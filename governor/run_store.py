@@ -186,6 +186,37 @@ class RunStore:
         meta.commands_executed.append(command)
         self.save_metadata(run_dir, meta)
 
+    def apply_dispatch_output(
+        self,
+        run_id: str,
+        role: str,
+        content: str,
+        *,
+        replace: bool = False,
+        dispatch_cmd: str | None = None,
+    ) -> Path:
+        """Write dispatch-captured output and transition state like record."""
+        if role not in ("executor", "validator"):
+            raise ValueError(f"Dispatch does not support role: {role}")
+
+        run_dir, meta = self.get_run(run_id)
+        out_name = ROLE_OUTPUT_FILES[role]
+        out_path = run_dir / out_name
+        action = f"record_{role}"
+
+        if out_path.exists() and not replace:
+            raise FileExistsError(
+                f"{out_name} already exists for run {run_id}. "
+                f"Use --replace to overwrite (audit trail protection)."
+            )
+
+        out_path.write_text(content, encoding="utf-8")
+        meta.state = transition_state(RunState(meta.state), action).value
+        cmd = dispatch_cmd or f"python -m governor dispatch --run-id {run_id} --role {role}"
+        meta.commands_executed.append(cmd)
+        self.save_metadata(run_dir, meta)
+        return out_path
+
 
 def open_store(repo_path: str | None = None, *, require_runs: bool = True) -> RunStore:
     """Open a store for an existing repo. Does not create `.governor` by default."""

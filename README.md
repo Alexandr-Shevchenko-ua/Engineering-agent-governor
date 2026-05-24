@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.1.2** adds run index, `list`/`doctor`, correct final-report ordering, and dogfooding docs.
+Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.2.0** adds bounded **`dispatch`** (preview-first, `--approve` required) plus index, gates, and reporting from v0.1.x.
 
 ## What this is
 
@@ -13,10 +13,10 @@ Local **delegation-first control plane** for engineering work executed by extern
 ## What this is not
 
 - Not a coding agent (does not implement product features)
-- Not autopilot (no automatic agent dispatch)
+- Not autopilot (no automatic agent dispatch or repair loops)
 - No external LLM API calls
-- No Cursor CLI integration (v0.2+)
-- No background daemons or production system access
+- No built-in Cursor CLI (use `--runner command --command …` with a trusted local CLI)
+- No background daemons, merge, push, or deploy
 
 ## Quickstart
 
@@ -57,12 +57,23 @@ gov init --task "My task" --repo-path .
 | `list` | List runs from `.governor/index.json` (`--limit`, `--json`) |
 | `doctor` | Readiness check (does not create `.governor`) |
 | `record` | Store outputs; executor/validator protected unless `--replace` |
+| `dispatch` | Preview or run local runner against role prompt (`--approve` to execute) |
 | `gate` | Run local checks → `08_gate_results.json` / `.md` |
 | `report` | Generate `09_final_report.md` and `10_lead_update.md` |
 
 **Dogfooding:** [docs/DOGFOODING.md](docs/DOGFOODING.md) — using Governor on this repo.
 
-**Smoke test:** `python scripts/smoke_governor_workflow.py`
+**Smoke tests:** `python scripts/smoke_governor_workflow.py` · `python scripts/smoke_dispatch_workflow.py`
+
+## Dispatch is not autopilot
+
+- **Preview by default** — without `--approve`, only prints planned runner, command, timeout, and output path.
+- **`--approve` required** to execute a local process; no background jobs.
+- **Runners:** `echo` (safe test), `command` (explicit argv, prompt on stdin), `cursor` (placeholder — configure via `--runner command`).
+- **Trusted runners only** — dispatch executes local commands in the target repo; no `shell=True`.
+- **No** automatic repair, merge, push, or deploy.
+- Same overwrite rules as `record` (`--replace` to supersede executor/validator artifacts).
+- Captured stdout/stderr is **redacted** before writing; trace stores prompt **path only**, not prompt body.
 
 ## Manual workflow with Cursor Agent
 
@@ -123,7 +134,21 @@ python3 -m venv .venv
 
 See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) before tagging.
 
-## Planned v0.2
+## Dispatch examples
 
-- Cursor CLI / Claude Code dispatcher hooks (bounded, human-approved)
-- Per-repo gate profiles
+```bash
+# Preview (no execution)
+python -m governor dispatch --run-id <id> --role executor --runner echo --repo-path .
+
+# Execute echo test runner
+python -m governor dispatch --run-id <id> --role executor --runner echo --approve --repo-path .
+
+# Explicit local command (prompt on stdin)
+python -m governor dispatch --run-id <id> --role validator --runner command \
+  --approve --repo-path . --command python scripts/fake_agent.py
+```
+
+## Planned v0.2.1 / v0.3
+
+- Documented Cursor CLI profile (when syntax is stable)
+- Per-repo gate profiles and runner config file

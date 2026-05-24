@@ -13,6 +13,8 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 - [ ] `.venv/bin/pytest tests/ -v` — all pass
 - [ ] `python -m governor --version` — expected version
 - [ ] `python scripts/smoke_governor_workflow.py` — SMOKE OK
+- [ ] `python scripts/smoke_dispatch_workflow.py` — DISPATCH SMOKE OK
+- [ ] Dispatch preview without `--approve` does not write executor/validator artifacts
 - [ ] `python -m governor doctor --repo-path .` — no FAIL on this repo
 - [ ] `python -m governor list --repo-path . --limit 5` — readable output
 

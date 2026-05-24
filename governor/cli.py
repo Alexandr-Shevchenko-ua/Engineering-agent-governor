@@ -8,6 +8,14 @@ import sys
 from pathlib import Path
 
 from governor import __version__
+from governor.dispatch import (
+    DEFAULT_TIMEOUT,
+    build_runner_spec,
+    execute_dispatch,
+    format_argv_display,
+    preview_dispatch,
+    validate_timeout,
+)
 from governor.doctor import run_doctor
 from governor.gates import run_gates, write_gate_artifacts
 from governor.index import list_entries
@@ -75,6 +83,44 @@ def _build_parser() -> argparse.ArgumentParser:
     p_list.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
 
     p_doctor = sub.add_parser("doctor", help="Readiness check for repo and governor state", parents=[parent])
+
+    p_dispatch = sub.add_parser(
+        "dispatch",
+        help="Preview or execute bounded local runner (requires --approve to run)",
+        parents=[parent],
+    )
+    p_dispatch.add_argument("--run-id", required=True)
+    p_dispatch.add_argument("--role", required=True, choices=["executor", "validator"])
+    p_dispatch.add_argument(
+        "--runner",
+        required=True,
+        choices=["echo", "command", "cursor"],
+        help="Runner profile: echo (safe test), command (explicit argv), cursor (placeholder)",
+    )
+    p_dispatch.add_argument(
+        "--approve",
+        action="store_true",
+        help="Execute runner; without this flag only preview is shown",
+    )
+    p_dispatch.add_argument(
+        "--replace",
+        action="store_true",
+        help="Overwrite existing executor/validator output",
+    )
+    p_dispatch.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
+        help=f"Max seconds for command runner (default {DEFAULT_TIMEOUT}, max 1800)",
+    )
+    p_dispatch.add_argument(
+        "--command",
+        dest="runner_argv",
+        nargs="*",
+        default=None,
+        metavar="ARG",
+        help="Executable and args for --runner command; place after other flags (prompt on stdin)",
+    )
 
     return parser
 
@@ -209,6 +255,61 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return code
 
 
+def _print_dispatch_preview(preview) -> None:
+    print(f"Run ID:        {preview.run_id}")
+    print(f"Role:          {preview.role}")
+    print(f"Prompt file:   {preview.prompt_path}")
+    print(f"Output target: {preview.output_path}")
+    print(f"Runner:        {preview.runner.name}")
+    print(f"Command:       {format_argv_display(preview.runner.argv)}")
+    print(f"Timeout:       {preview.timeout}s")
+    print("Mode:          preview (pass --approve to execute)")
+
+
+def cmd_dispatch(args: argparse.Namespace) -> int:
+    repo_path = _repo_path_from_args(args)
+    try:
+        timeout = validate_timeout(args.timeout)
+        spec = build_runner_spec(args.runner, args.runner_argv)
+        store = open_store(repo_path)
+        if not args.approve:
+            preview = preview_dispatch(
+                store,
+                args.run_id,
+                args.role,
+                spec,
+                timeout,
+                replace=args.replace,
+            )
+            _print_dispatch_preview(preview)
+            return 0
+        out_path, result = execute_dispatch(
+            store,
+            args.run_id,
+            args.role,
+            spec,
+            timeout,
+            replace=args.replace,
+            repo_path=repo_path,
+        )
+        _, meta = store.get_run(args.run_id)
+        print(f"Dispatched {args.role} -> {out_path.name}")
+        print(f"Exit code: {result.exit_code}")
+        print(f"Duration:  {result.duration_seconds:.2f}s")
+        print(f"State:     {meta.state}")
+        print(f"Next:      {NEXT_ACTIONS.get(RunState(meta.state), '')}")
+        return 0 if result.exit_code == 0 else 1
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except FileExistsError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     try:
         store = open_store(_repo_path_from_args(args))
@@ -243,6 +344,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": cmd_status,
         "list": cmd_list,
         "doctor": cmd_doctor,
+        "dispatch": cmd_dispatch,
         "record": cmd_record,
         "gate": cmd_gate,
         "report": cmd_report,

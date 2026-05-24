@@ -33,6 +33,26 @@ Inspect artifacts under `.governor/runs/<run-id>/` before merging.
 
 Optional: `doctor` before starting; `list` / `status` anytime.
 
+## Bounded dispatch (v0.2)
+
+Dispatch is optional — manual `record` still works.
+
+```bash
+# Always preview first
+python -m governor dispatch --run-id <id> --role executor --runner echo --repo-path .
+
+# Execute only after reviewing preview
+python -m governor dispatch --run-id <id> --role executor --runner echo --approve --repo-path .
+```
+
+**Safe usage:**
+
+- Use `echo` for plumbing tests; use `--runner command` only with scripts you trust.
+- Never dispatch as root or with credentials in argv.
+- Do not use dispatch for merge/push/deploy — Governor will refuse obvious destructive argv patterns.
+- `cursor` runner prints configuration guidance; wire your CLI via `--runner command --command …`.
+- Inspect `05_*` / `06_*` artifacts — dispatch output is not automatic PASS.
+
 ## Verdict meanings
 
 | Verdict | Meaning |
@@ -78,4 +98,5 @@ Gate-only outcomes (`GATES_PASS_NO_VALIDATOR`, etc.) are **not** validator sign-
 ```bash
 python -m governor doctor --repo-path .
 python scripts/smoke_governor_workflow.py
+python scripts/smoke_dispatch_workflow.py
 ```
