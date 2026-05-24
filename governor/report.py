@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from governor.models import NEXT_ACTIONS, RunState, transition_state
+from governor.models import NEXT_ACTIONS, RunState, require_transition
 from governor.run_store import RunStore
 from governor.verdict import parse_validator_verdict
 
@@ -157,7 +157,7 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
     if report_cmd not in meta.commands_executed:
         meta.commands_executed.append(report_cmd)
     meta.outcome = outcome
-    meta.state = transition_state(RunState(meta.state), "report").value
+    meta.state = require_transition(RunState(meta.state), "report").value
     store.save_metadata(run_dir, meta)
 
     artifacts = store.list_artifacts(run_dir)

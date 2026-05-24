@@ -5,10 +5,15 @@ from __future__ import annotations
 import shlex
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from governor.models import ROLE_OUTPUT_FILES, RunState, transition_state
+from governor.models import (
+    ROLE_OUTPUT_FILES,
+    can_transition,
+    record_action_for_role,
+    require_transition,
+)
 from governor.redaction import redact
 from governor.run_store import RunStore
 from governor.trace import TraceLogger
@@ -59,6 +64,7 @@ class DispatchPreview:
     runner: RunnerSpec
     timeout: int
     mode: str  # preview | execute
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -239,8 +245,18 @@ def format_dispatch_markdown(
 ) -> str:
     stdout = result.stdout.strip() or "_empty_"
     stderr = result.stderr.strip() or "_empty_"
+    status = "OK" if result.exit_code == 0 else "FAILED"
+    notes = [
+        "- Output was captured by Governor dispatch.",
+        "- Redaction is heuristic; review before sharing.",
+    ]
+    if result.exit_code != 0:
+        notes.append(
+            "- Non-zero exit: this is diagnostic output, not successful executor/validator evidence."
+        )
     return (
         "# Dispatch output\n\n"
+        f"**Dispatch status:** {status}\n"
         f"**Runner:** {spec.name}\n"
         f"**Role:** {role}\n"
         f"**Exit code:** {result.exit_code}\n"
@@ -251,9 +267,41 @@ def format_dispatch_markdown(
         "## Stderr\n\n"
         f"{stderr}\n\n"
         "## Notes\n\n"
-        "- Output was captured by Governor dispatch.\n"
-        "- Redaction is heuristic; review before sharing.\n"
+        + "\n".join(notes)
+        + "\n"
     )
+
+
+def _collect_preview_warnings(
+    run_dir: Path,
+    meta_state: str,
+    role: str,
+    *,
+    replace: bool,
+) -> list[str]:
+    warnings: list[str] = []
+    out_path = output_path_for_role(run_dir, role)
+    if out_path.exists() and not replace:
+        warnings.append(
+            "Existing output artifact detected; execution will require --replace"
+        )
+    action = record_action_for_role(role)
+    from governor.models import RunState
+
+    if not can_transition(RunState(meta_state), action):
+        warnings.append(
+            f"Current state {meta_state} is not valid for {action}; execution will fail"
+        )
+    return warnings
+
+
+def _ensure_execute_replace_allowed(run_dir: Path, role: str, run_id: str, replace: bool) -> None:
+    out_path = output_path_for_role(run_dir, role)
+    if out_path.exists() and not replace:
+        raise FileExistsError(
+            f"{out_path.name} already exists for run {run_id}. "
+            f"Use --replace to overwrite (audit trail protection)."
+        )
 
 
 def build_preview(
@@ -269,11 +317,7 @@ def build_preview(
     validate_role(role)
     prompt_path = prompt_path_for_role(run_dir, role)
     out_path = output_path_for_role(run_dir, role)
-    if out_path.exists() and not replace:
-        raise FileExistsError(
-            f"{out_path.name} already exists for run {meta.run_id}. "
-            f"Use --replace to overwrite."
-        )
+    warnings = _collect_preview_warnings(run_dir, meta.state, role, replace=replace)
     return DispatchPreview(
         run_id=meta.run_id,
         role=role,
@@ -282,6 +326,7 @@ def build_preview(
         runner=spec,
         timeout=timeout,
         mode="preview",
+        warnings=warnings,
     )
 
 
@@ -293,6 +338,7 @@ def dispatch_command_line(
     approve: bool,
     command_args: list[str] | None,
     repo_path: str,
+    accept_failed_output: bool = False,
 ) -> str:
     parts = [
         "python -m governor dispatch",
@@ -304,6 +350,8 @@ def dispatch_command_line(
         parts.append("--command " + format_argv_display(command_args))
     if approve:
         parts.append("--approve")
+    if accept_failed_output:
+        parts.append("--accept-failed-output")
     parts.append(f"--repo-path {repo_path}")
     return " ".join(parts)
 
@@ -320,14 +368,17 @@ def preview_dispatch(
     preview = build_preview(store, run_id, role, spec, timeout, replace=replace)
     run_dir, meta = store.get_run(run_id)
     trace = TraceLogger(run_dir, meta.run_id)
+    reason = f"runner={spec.name} timeout={timeout}s"
+    if preview.warnings:
+        reason += "; " + "; ".join(preview.warnings)
     trace.append(
         phase="dispatch",
         actor="governor",
         action="dispatch_preview",
         input_ref=preview.prompt_path.name,
         output_ref=None,
-        status="ok",
-        reason=f"runner={spec.name} timeout={timeout}s",
+        status="warn" if preview.warnings else "ok",
+        reason=reason,
     )
     return preview
 
@@ -341,48 +392,74 @@ def execute_dispatch(
     *,
     replace: bool,
     repo_path: str,
+    accept_failed_output: bool = False,
 ) -> tuple[Path, DispatchResult]:
-    preview = build_preview(store, run_id, role, spec, timeout, replace=replace)
     run_dir, meta = store.get_run(run_id)
-    prompt_text = preview.prompt_path.read_text(encoding="utf-8")
+    validate_role(role)
+    _ensure_execute_replace_allowed(run_dir, role, meta.run_id, replace)
+    action = record_action_for_role(role)
+    from governor.models import RunState
+
+    require_transition(RunState(meta.state), action)
+
+    prompt_path = prompt_path_for_role(run_dir, role)
+    prompt_text = prompt_path.read_text(encoding="utf-8")
     cwd = Path(meta.repo_path)
 
     result = execute_runner(spec, role, prompt_text, cwd, timeout)
-    markdown = format_dispatch_markdown(
-        spec=spec,
-        role=role,
-        prompt_name=preview.prompt_path.name,
-        result=result,
+    markdown = redact(
+        format_dispatch_markdown(
+            spec=spec,
+            role=role,
+            prompt_name=prompt_path.name,
+            result=result,
+        )
     )
-    markdown = redact(markdown)
+
+    dispatch_cmd = dispatch_command_line(
+        run_id,
+        role,
+        spec.name,
+        approve=True,
+        command_args=spec.argv if spec.name == "command" else None,
+        repo_path=repo_path,
+        accept_failed_output=accept_failed_output,
+    )
+
+    trace = TraceLogger(run_dir, meta.run_id)
+    action_name = f"dispatch_{role}"
+    trace_reason = (
+        f"runner={spec.name} exit={result.exit_code} "
+        f"duration={result.duration_seconds:.2f}s"
+    )
+
+    if result.exit_code != 0 and not accept_failed_output:
+        failed_path = store.write_failed_dispatch_artifact(run_dir, role, markdown)
+        trace.append(
+            phase="dispatch",
+            actor="governor",
+            action=action_name,
+            input_ref=prompt_path.name,
+            output_ref=failed_path.name,
+            status="fail",
+            reason=trace_reason + "; diagnostic_only",
+        )
+        return failed_path, result
 
     out_path = store.apply_dispatch_output(
         run_id,
         role,
         markdown,
         replace=replace,
-        dispatch_cmd=dispatch_command_line(
-            run_id,
-            role,
-            spec.name,
-            approve=True,
-            command_args=spec.argv if spec.name == "command" else None,
-            repo_path=repo_path,
-        ),
+        dispatch_cmd=dispatch_cmd,
     )
-
-    trace = TraceLogger(run_dir, meta.run_id)
-    action = f"dispatch_{role}"
     trace.append(
         phase="dispatch",
         actor="governor",
-        action=action,
-        input_ref=preview.prompt_path.name,
+        action=action_name,
+        input_ref=prompt_path.name,
         output_ref=out_path.name,
         status="ok" if result.exit_code == 0 else "fail",
-        reason=(
-            f"runner={spec.name} exit={result.exit_code} "
-            f"duration={result.duration_seconds:.2f}s"
-        ),
+        reason=trace_reason,
     )
     return out_path, result

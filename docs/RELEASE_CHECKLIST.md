@@ -15,6 +15,8 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 - [ ] `python scripts/smoke_governor_workflow.py` — SMOKE OK
 - [ ] `python scripts/smoke_dispatch_workflow.py` — DISPATCH SMOKE OK
 - [ ] Dispatch preview without `--approve` does not write executor/validator artifacts
+- [ ] Invalid validator-before-executor dispatch does not create `06_validator_output.md`
+- [ ] Non-zero dispatch writes `.failed.md` and leaves state unchanged (unless `--accept-failed-output`)
 - [ ] `python -m governor doctor --repo-path .` — no FAIL on this repo
 - [ ] `python -m governor list --repo-path . --limit 5` — readable output
 

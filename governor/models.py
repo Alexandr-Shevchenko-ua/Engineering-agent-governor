@@ -48,6 +48,7 @@ _STATE_TRANSITIONS: dict[str, dict[RunState, RunState]] = {
         RunState.REPAIR_RECORDED: RunState.FINAL_REPORT_READY,
         RunState.EXECUTOR_OUTPUT_RECORDED: RunState.FINAL_REPORT_READY,
         RunState.HUMAN_DECISION_REQUIRED: RunState.FINAL_REPORT_READY,
+        RunState.FINAL_REPORT_READY: RunState.FINAL_REPORT_READY,
     },
     "human_decision": {
         RunState.VALIDATOR_OUTPUT_RECORDED: RunState.HUMAN_DECISION_REQUIRED,
@@ -60,6 +61,32 @@ def transition_state(current: RunState, action: str) -> RunState:
     """Return next state for action, or unchanged if no transition defined."""
     mapping = _STATE_TRANSITIONS.get(action, {})
     return mapping.get(current, current)
+
+
+def can_transition(current: RunState, action: str) -> bool:
+    """True if action is defined and allowed from current state."""
+    mapping = _STATE_TRANSITIONS.get(action, {})
+    return current in mapping
+
+
+def allowed_from_states(action: str) -> list[RunState]:
+    return list(_STATE_TRANSITIONS.get(action, {}).keys())
+
+
+def invalid_transition_message(current: RunState, action: str) -> str:
+    mapping = _STATE_TRANSITIONS.get(action, {})
+    if mapping:
+        allowed = ", ".join(s.value for s in mapping)
+        return f"Invalid transition: {current.value} --{action}--> (allowed from: {allowed})"
+    return f"Invalid transition: {current.value} --{action}--> (unknown action)"
+
+
+def require_transition(current: RunState, action: str) -> RunState:
+    """Return next state or raise ValueError with a clear message."""
+    mapping = _STATE_TRANSITIONS.get(action, {})
+    if current not in mapping:
+        raise ValueError(invalid_transition_message(current, action))
+    return mapping[current]
 
 
 NEXT_ACTIONS: dict[RunState, str] = {
@@ -79,6 +106,19 @@ ROLE_OUTPUT_FILES: dict[str, str] = {
     "validator": "06_validator_output.md",
     "human_note": "human_notes.md",
 }
+
+ROLE_FAILED_OUTPUT_FILES: dict[str, str] = {
+    "executor": "05_executor_output.failed.md",
+    "validator": "06_validator_output.failed.md",
+}
+
+
+def record_action_for_role(role: str) -> str:
+    if role == "human_note":
+        return "record_human_note"
+    if role == "repair":
+        return "record_repair"
+    return f"record_{role}"
 
 
 @dataclass

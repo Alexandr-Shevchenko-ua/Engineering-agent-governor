@@ -6,9 +6,12 @@ import json
 from pathlib import Path
 
 from governor.models import (
+    ROLE_FAILED_OUTPUT_FILES,
     ROLE_OUTPUT_FILES,
     RunMetadata,
     RunState,
+    record_action_for_role,
+    require_transition,
     transition_state,
 )
 from governor.redaction import redact
@@ -92,7 +95,7 @@ class RunStore:
             reason=f"Created run for task: {task}",
         )
 
-        meta.state = transition_state(RunState.INTAKE_CREATED, "init").value
+        meta.state = require_transition(RunState.INTAKE_CREATED, "init").value
         meta.commands_executed.append(
             f"python -m governor init --task {task!r} --repo-path {self.repo_path}"
         )
@@ -121,12 +124,13 @@ class RunStore:
         if role == "repair":
             meta.repair_count += 1
             out_name = f"07_repair_output_{meta.repair_count}.md"
-            action = "record_repair"
         elif role in ROLE_OUTPUT_FILES:
             out_name = ROLE_OUTPUT_FILES[role]
-            action = f"record_{role}" if role != "human_note" else "record_human_note"
         else:
             raise ValueError(f"Unknown role: {role}")
+
+        action = record_action_for_role(role)
+        state = RunState(meta.state)
 
         if file_path:
             content = file_path.read_text(encoding="utf-8")
@@ -139,25 +143,27 @@ class RunStore:
 
         content = redact(content)
         out_path = run_dir / out_name
+        had_existing = out_path.exists()
 
         protected_roles = {"executor", "validator"}
-        if role in protected_roles and out_path.exists() and not replace:
+        if role in protected_roles and had_existing and not replace:
             raise FileExistsError(
                 f"{out_name} already exists for run {run_id}. "
                 f"Use --replace to overwrite (audit trail protection)."
             )
 
-        if role == "human_note" and out_path.exists():
+        if role == "human_note":
+            next_state = state
+        elif replace and had_existing:
+            next_state = state
+        else:
+            next_state = require_transition(state, action)
+
+        if role == "human_note" and had_existing:
             existing = out_path.read_text(encoding="utf-8")
             content = existing + "\n\n---\n\n" + content
         out_path.write_text(content, encoding="utf-8")
-
-        state = RunState(meta.state)
-        if role == "human_note":
-            new_state = state
-        else:
-            new_state = transition_state(state, action)
-        meta.state = new_state.value
+        meta.state = next_state.value
         cmd = f"python -m governor record --run-id {run_id} --role {role}"
         meta.commands_executed.append(cmd)
         self.save_metadata(run_dir, meta)
@@ -175,7 +181,7 @@ class RunStore:
     def update_state(self, run_id: str, action: str, *, outcome: str | None = None) -> RunMetadata:
         run_dir, meta = self.get_run(run_id)
         state = RunState(meta.state)
-        meta.state = transition_state(state, action).value
+        meta.state = require_transition(state, action).value
         if outcome:
             meta.outcome = outcome
         self.save_metadata(run_dir, meta)
@@ -186,6 +192,19 @@ class RunStore:
         meta.commands_executed.append(command)
         self.save_metadata(run_dir, meta)
 
+    def write_failed_dispatch_artifact(
+        self,
+        run_dir: Path,
+        role: str,
+        content: str,
+    ) -> Path:
+        """Diagnostic artifact only; does not change workflow state or commands."""
+        if role not in ROLE_FAILED_OUTPUT_FILES:
+            raise ValueError(f"No failed artifact mapping for role: {role}")
+        out_path = run_dir / ROLE_FAILED_OUTPUT_FILES[role]
+        out_path.write_text(content, encoding="utf-8")
+        return out_path
+
     def apply_dispatch_output(
         self,
         run_id: str,
@@ -195,23 +214,30 @@ class RunStore:
         replace: bool = False,
         dispatch_cmd: str | None = None,
     ) -> Path:
-        """Write dispatch-captured output and transition state like record."""
+        """Write successful dispatch output and transition state like record."""
         if role not in ("executor", "validator"):
             raise ValueError(f"Dispatch does not support role: {role}")
 
         run_dir, meta = self.get_run(run_id)
         out_name = ROLE_OUTPUT_FILES[role]
         out_path = run_dir / out_name
-        action = f"record_{role}"
+        action = record_action_for_role(role)
+        state = RunState(meta.state)
 
-        if out_path.exists() and not replace:
+        had_existing = out_path.exists()
+        if had_existing and not replace:
             raise FileExistsError(
                 f"{out_name} already exists for run {run_id}. "
                 f"Use --replace to overwrite (audit trail protection)."
             )
 
+        if replace and had_existing:
+            next_state = state
+        else:
+            next_state = require_transition(state, action)
+
         out_path.write_text(content, encoding="utf-8")
-        meta.state = transition_state(RunState(meta.state), action).value
+        meta.state = next_state.value
         cmd = dispatch_cmd or f"python -m governor dispatch --run-id {run_id} --role {role}"
         meta.commands_executed.append(cmd)
         self.save_metadata(run_dir, meta)

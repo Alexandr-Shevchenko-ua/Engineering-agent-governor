@@ -108,6 +108,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing executor/validator output",
     )
     p_dispatch.add_argument(
+        "--accept-failed-output",
+        action="store_true",
+        help="On non-zero exit, write canonical output and transition (default: .failed.md only)",
+    )
+    p_dispatch.add_argument(
         "--timeout",
         type=int,
         default=DEFAULT_TIMEOUT,
@@ -264,6 +269,8 @@ def _print_dispatch_preview(preview) -> None:
     print(f"Command:       {format_argv_display(preview.runner.argv)}")
     print(f"Timeout:       {preview.timeout}s")
     print("Mode:          preview (pass --approve to execute)")
+    for w in preview.warnings:
+        print(f"Warning:       {w}")
 
 
 def cmd_dispatch(args: argparse.Namespace) -> int:
@@ -291,12 +298,15 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             timeout,
             replace=args.replace,
             repo_path=repo_path,
+            accept_failed_output=args.accept_failed_output,
         )
         _, meta = store.get_run(args.run_id)
         print(f"Dispatched {args.role} -> {out_path.name}")
         print(f"Exit code: {result.exit_code}")
         print(f"Duration:  {result.duration_seconds:.2f}s")
         print(f"State:     {meta.state}")
+        if result.exit_code != 0 and not args.accept_failed_output:
+            print("Note:      Non-zero exit — diagnostic .failed.md only; state unchanged.")
         print(f"Next:      {NEXT_ACTIONS.get(RunState(meta.state), '')}")
         return 0 if result.exit_code == 0 else 1
     except FileNotFoundError as e:

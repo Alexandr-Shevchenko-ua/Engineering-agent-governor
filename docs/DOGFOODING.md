@@ -52,6 +52,22 @@ python -m governor dispatch --run-id <id> --role executor --runner echo --approv
 - Do not use dispatch for merge/push/deploy — Governor will refuse obvious destructive argv patterns.
 - `cursor` runner prints configuration guidance; wire your CLI via `--runner command --command …`.
 - Inspect `05_*` / `06_*` artifacts — dispatch output is not automatic PASS.
+- If runner exits non-zero, check `*.failed.md` — that is **diagnostic only**, not executor/validator evidence.
+- Use `--accept-failed-output` only when you intentionally want a failed run to occupy the canonical slot (rare).
+
+### State order (enforced)
+
+1. executor (`record` or `dispatch --approve`)
+2. `gate`
+3. validator
+4. `report`
+
+Skipping steps raises `Invalid transition: …` and does **not** write canonical `05_*` / `06_*` files.
+
+### Preview vs execute
+
+- Preview always exits 0 and may warn: existing artifact needs `--replace`, or wrong state for role.
+- Execute enforces transitions and overwrite rules.
 
 ## Verdict meanings
 

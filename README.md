@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.2.0** adds bounded **`dispatch`** (preview-first, `--approve` required) plus index, gates, and reporting from v0.1.x.
+Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.2.1** hardens **`dispatch`** state policy, preview warnings, and non-zero exit handling.
 
 ## What this is
 
@@ -67,8 +67,10 @@ gov init --task "My task" --repo-path .
 
 ## Dispatch is not autopilot
 
-- **Preview by default** — without `--approve`, only prints planned runner, command, timeout, and output path.
+- **Preview by default** — without `--approve`, only prints planned runner, command, timeout, and output path (warnings if artifact exists or state is wrong).
 - **`--approve` required** to execute a local process; no background jobs.
+- **State preconditions** — executor before validator; gate only after executor output; invalid transitions fail before any write.
+- **Non-zero exit (default)** — writes `05_executor_output.failed.md` / `06_validator_output.failed.md` only; **does not** advance workflow state. Use `--accept-failed-output` to record canonical output anyway.
 - **Runners:** `echo` (safe test), `command` (explicit argv, prompt on stdin), `cursor` (placeholder — configure via `--runner command`).
 - **Trusted runners only** — dispatch executes local commands in the target repo; no `shell=True`.
 - **No** automatic repair, merge, push, or deploy.
@@ -148,7 +150,17 @@ python -m governor dispatch --run-id <id> --role validator --runner command \
   --approve --repo-path . --command python scripts/fake_agent.py
 ```
 
-## Planned v0.2.1 / v0.3
+## State preconditions (v0.2.1)
+
+| Action | Allowed from |
+|--------|----------------|
+| executor record/dispatch | `INTAKE_CREATED`, `EXECUTOR_PROMPT_READY`, `REPAIR_RECORDED` |
+| validator record/dispatch | `EXECUTOR_OUTPUT_RECORDED`, `GATES_RUN`, `REPAIR_RECORDED` |
+| gate | `EXECUTOR_OUTPUT_RECORDED`, `VALIDATOR_OUTPUT_RECORDED`, `REPAIR_RECORDED` |
+| repair | `EXECUTOR_OUTPUT_RECORDED`, `GATES_RUN`, `VALIDATOR_OUTPUT_RECORDED` |
+| report | states above + `HUMAN_DECISION_REQUIRED` |
+
+## Planned v0.3
 
 - Documented Cursor CLI profile (when syntax is stable)
 - Per-repo gate profiles and runner config file
