@@ -1,0 +1,13 @@
+[project]
+name = "engineering-agent-governor"
+version = "0.1.0"
+description = "Local delegation-first engineering governor harness"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.scripts]
+gov = "governor.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

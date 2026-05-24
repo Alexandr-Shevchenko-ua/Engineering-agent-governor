@@ -147,6 +147,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Governor local runs (when developing against this repo)
+.governor/
+
 # Environments
 .env
 .envrc
