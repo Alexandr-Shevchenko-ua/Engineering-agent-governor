@@ -22,7 +22,7 @@ from governor.templates import (
 from governor.trace import TraceLogger
 from governor.utils import (
     find_run_dir,
-    governor_root,
+    require_governor_runs,
     resolve_repo_path,
     runs_dir,
     slugify,
@@ -54,6 +54,7 @@ class RunStore:
         )
 
     def create_run(self, task: str) -> tuple[Path, RunMetadata]:
+        runs_dir(self.repo_path).mkdir(parents=True, exist_ok=True)
         slug = slugify(task)
         run_id = f"{utc_run_timestamp()}_{slug}"
         run_dir = runs_dir(self.repo_path) / run_id
@@ -89,6 +90,7 @@ class RunStore:
             reason=f"Created run for task: {task}",
         )
 
+        meta.state = transition_state(RunState.INTAKE_CREATED, "init").value
         meta.commands_executed.append(
             f"python -m governor init --task {task!r} --repo-path {self.repo_path}"
         )
@@ -109,6 +111,7 @@ class RunStore:
         *,
         file_path: Path | None = None,
         text: str | None = None,
+        replace: bool = False,
     ) -> Path:
         run_dir, meta = self.get_run(run_id)
         trace = TraceLogger(run_dir, meta.run_id)
@@ -134,6 +137,14 @@ class RunStore:
 
         content = redact(content)
         out_path = run_dir / out_name
+
+        protected_roles = {"executor", "validator"}
+        if role in protected_roles and out_path.exists() and not replace:
+            raise FileExistsError(
+                f"{out_name} already exists for run {run_id}. "
+                f"Use --replace to overwrite (audit trail protection)."
+            )
+
         if role == "human_note" and out_path.exists():
             existing = out_path.read_text(encoding="utf-8")
             content = existing + "\n\n---\n\n" + content
@@ -174,11 +185,14 @@ class RunStore:
         self.save_metadata(run_dir, meta)
 
 
-def ensure_governor_initialized(repo_path: Path) -> None:
-    governor_root(repo_path).mkdir(parents=True, exist_ok=True)
-
-
-def open_store(repo_path: str | None = None) -> RunStore:
+def open_store(repo_path: str | None = None, *, require_runs: bool = True) -> RunStore:
+    """Open a store for an existing repo. Does not create `.governor` by default."""
     path = resolve_repo_path(repo_path)
-    ensure_governor_initialized(path)
+    if require_runs:
+        require_governor_runs(path)
     return RunStore(path)
+
+
+def init_store(repo_path: str | None = None) -> RunStore:
+    """Open store for init; creates `.governor/runs` parent when the run is created."""
+    return RunStore(resolve_repo_path(repo_path))

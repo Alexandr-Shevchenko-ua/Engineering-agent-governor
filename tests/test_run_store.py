@@ -17,7 +17,7 @@ def test_create_run_writes_artifacts_and_state():
         store = RunStore(repo)
         run_dir, meta = store.create_run("Centralize retry policy")
 
-        assert meta.state == RunState.INTAKE_CREATED.value
+        assert meta.state == RunState.EXECUTOR_PROMPT_READY.value
         assert (run_dir / "00_task_intake.md").exists()
         assert (run_dir / "03_executor_prompt.md").exists()
         assert (run_dir / "04_validator_prompt.md").exists()

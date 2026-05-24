@@ -21,8 +21,22 @@ SUSPICIOUS_PATH_PATTERNS = [
 ]
 
 TOKEN_IN_DIFF = re.compile(
-    r"(?i)(api[_-]?key|secret|password|token|bearer)\s*[=:]\s*['\"]?[a-zA-Z0-9\-._]{8,}"
+    r"(?i)(api[_-]?key|secret|password|token)\s*[=:]\s*['\"]?[a-zA-Z0-9\-._]{8,}"
 )
+BEARER_IN_DIFF = re.compile(r"(?i)authorization\s*:\s*bearer\s+\S+")
+
+
+def is_git_worktree(repo: Path) -> bool:
+    """True if path is inside a git work tree (supports worktrees)."""
+    rc, out, _ = _run_cmd(["git", "rev-parse", "--is-inside-work-tree"], repo)
+    return rc == 0 and out.strip().lower() == "true"
+
+
+def detect_secrets_in_diff(raw_diff: str) -> bool:
+    """Scan unredacted diff for token-like patterns (used before redaction)."""
+    if not raw_diff:
+        return False
+    return bool(TOKEN_IN_DIFF.search(raw_diff) or BEARER_IN_DIFF.search(raw_diff))
 
 
 @dataclass
@@ -169,7 +183,7 @@ def _security_scan(repo: Path, diff_text: str, changed_files: list[str]) -> tupl
                 suspicious.append(path)
                 break
 
-    if TOKEN_IN_DIFF.search(diff_text):
+    if detect_secrets_in_diff(diff_text):
         warnings.append("Possible secret/token pattern detected in git diff")
 
     if len(scan_paths) > 50:
@@ -180,7 +194,7 @@ def _security_scan(repo: Path, diff_text: str, changed_files: list[str]) -> tupl
 
 def run_gates(target_repo: Path) -> GateReport:
     report = GateReport()
-    is_git = (target_repo / ".git").exists()
+    is_git = is_git_worktree(target_repo)
 
     if not is_git:
         report.results.append(
@@ -205,13 +219,13 @@ def run_gates(target_repo: Path) -> GateReport:
     )
 
     rc, diff_out, _ = _run_cmd(["git", "diff"], target_repo)
-    diff_redacted = redact(diff_out)
     file_count, added, deleted, files = _parse_numstat(target_repo)
     report.changed_files_count = file_count
     report.lines_added = added
     report.lines_deleted = deleted
 
-    suspicious, warnings = _security_scan(target_repo, diff_redacted, files)
+    # Security scan uses raw diff; stored gate details remain redacted.
+    suspicious, warnings = _security_scan(target_repo, diff_out, files)
     report.suspicious_files = suspicious
     report.security_warnings = warnings
 

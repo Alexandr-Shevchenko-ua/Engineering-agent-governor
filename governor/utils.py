@@ -36,10 +36,20 @@ def runs_dir(repo_path: Path) -> Path:
     return governor_root(repo_path) / "runs"
 
 
-def find_run_dir(repo_path: Path, run_id: str | None) -> Path:
+def require_governor_runs(repo_path: Path) -> Path:
+    """Return runs directory or raise if governor was never initialized here."""
     base = runs_dir(repo_path)
-    if not base.exists():
-        raise FileNotFoundError(f"No runs found under {base}")
+    if not base.is_dir():
+        root = governor_root(repo_path)
+        raise FileNotFoundError(
+            f"Governor runs not found at {base}. "
+            f"Run 'python -m governor init --task \"...\" --repo-path {repo_path}' first."
+        )
+    return base
+
+
+def find_run_dir(repo_path: Path, run_id: str | None) -> Path:
+    base = require_governor_runs(repo_path)
     if run_id:
         run_dir = base / run_id
         if not run_dir.is_dir():

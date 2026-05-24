@@ -16,6 +16,7 @@ def test_report_generation_minimal_artifacts():
         store = RunStore(repo)
         run_dir, meta = store.create_run("Report task")
         store.record_output(meta.run_id, "executor", text="## Plan\n- edit foo.py\n## Commands\n- pytest: pass")
+        store.record_output(meta.run_id, "validator", text="Verdict: PASS\n")
         (run_dir / "08_gate_results.json").write_text(
             json.dumps({"overall": "PASS", "results": [], "changed_files_count": 1, "lines_added": 2, "lines_deleted": 0}),
             encoding="utf-8",

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 from governor.models import NEXT_ACTIONS, RunState
 from governor.run_store import RunStore
+from governor.verdict import parse_validator_verdict
 
 
 def _read_optional(run_dir: Path, name: str, max_chars: int = 4000) -> str | None:
@@ -27,20 +27,6 @@ def _summarize(text: str | None, lines: int = 12) -> str:
     if len(parts) <= lines:
         return text
     return "\n".join(parts[:lines]) + f"\n\n... ({len(parts) - lines} more lines)"
-
-
-def _extract_verdict(validator_text: str | None) -> str | None:
-    if not validator_text:
-        return None
-    for label in (
-        "HUMAN_DECISION_REQUIRED",
-        "REPAIR_REQUIRED",
-        "PASS_WITH_RISK",
-        "PASS",
-    ):
-        if re.search(rf"^\s*{label}\s*$", validator_text, re.MULTILINE | re.IGNORECASE):
-            return label.upper()
-    return None
 
 
 def _gate_summary(run_dir: Path) -> str:
@@ -66,22 +52,58 @@ def _gate_summary(run_dir: Path) -> str:
     return "\n".join(parts)
 
 
-def _outcome_from_run(
-    state: str,
+def compute_outcome(
+    *,
     verdict: str | None,
     gate_overall: str | None,
+    has_gates: bool,
+    state: str,
+    has_executor: bool,
 ) -> str:
-    if verdict == "HUMAN_DECISION_REQUIRED":
-        return "HUMAN_DECISION_REQUIRED"
-    if verdict == "REPAIR_REQUIRED":
-        return "REPAIR_REQUIRED"
-    if verdict in ("PASS", "PASS_WITH_RISK"):
+    """Explicit outcome for final report."""
+    if verdict:
         return verdict
+    if not has_gates:
+        if state in (
+            RunState.EXECUTOR_PROMPT_READY.value,
+            RunState.INTAKE_CREATED.value,
+        ):
+            return "INTAKE_ONLY"
+        if has_executor:
+            return "IN_PROGRESS"
+        return "INTAKE_ONLY"
     if gate_overall == "FAIL":
         return "GATES_FAILED"
-    if state == RunState.FINAL_REPORT_READY.value:
-        return "REPORT_COMPLETE"
+    if gate_overall == "WARN":
+        return "GATES_WARN_NO_VALIDATOR"
+    if gate_overall == "PASS":
+        return "GATES_PASS_NO_VALIDATOR"
     return "IN_PROGRESS"
+
+
+def lead_need_from_lead(
+    *,
+    verdict: str | None,
+    gate_overall: str | None,
+    has_validator: bool,
+    has_gates: bool,
+    human_decision: bool,
+) -> str:
+    if human_decision or verdict == "HUMAN_DECISION_REQUIRED":
+        return "Lead decision required on escalated validator/product risk items."
+    if verdict == "REPAIR_REQUIRED":
+        return "Owner to complete repair loop and re-run gate/validator."
+    if verdict == "PASS_WITH_RISK":
+        return "Lead acknowledgment of documented risks before merge."
+    if not has_validator:
+        if has_gates and gate_overall in ("WARN", "FAIL"):
+            return "Review gate results; validator output not recorded — do not merge blindly."
+        if has_gates and gate_overall == "PASS":
+            return "Confirm gate-only PASS is acceptable without validator sign-off."
+        return "Awaiting delegated executor/validator outputs."
+    if verdict == "PASS":
+        return "Optional explicit sign-off if your process requires it."
+    return "Review outcome and artifacts before merge."
 
 
 def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
@@ -96,12 +118,19 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
 
     gate_data = None
     gate_path = run_dir / "08_gate_results.json"
-    if gate_path.exists():
+    has_gates = gate_path.exists()
+    if has_gates:
         gate_data = json.loads(gate_path.read_text(encoding="utf-8"))
 
-    verdict = _extract_verdict(validator_out)
+    verdict = parse_validator_verdict(validator_out)
     gate_overall = gate_data.get("overall") if gate_data else None
-    outcome = _outcome_from_run(meta.state, verdict, gate_overall)
+    outcome = compute_outcome(
+        verdict=verdict,
+        gate_overall=gate_overall,
+        has_gates=has_gates,
+        state=meta.state,
+        has_executor=executor_out is not None,
+    )
 
     human_decision = (
         verdict == "HUMAN_DECISION_REQUIRED"
@@ -116,8 +145,17 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
         next_action = "Address validator repair items, record repair output, re-run gate."
     elif human_decision:
         next_action = "Lead decision required before merge or deployment."
+    elif outcome in ("GATES_PASS_NO_VALIDATOR", "GATES_WARN_NO_VALIDATOR"):
+        next_action = "Record validator output or obtain lead sign-off for gate-only result."
 
     git_summary = _gate_summary(run_dir)
+    need_lead = lead_need_from_lead(
+        verdict=verdict,
+        gate_overall=gate_overall,
+        has_validator=validator_out is not None,
+        has_gates=has_gates,
+        human_decision=human_decision,
+    )
 
     report_lines = [
         "# Final report",
@@ -159,7 +197,7 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
             "",
             "## Human decision needed",
             "",
-            "Yes — lead must decide." if human_decision else "No — proceed per validator/gate outcome.",
+            "Yes — lead must decide." if human_decision else "No — unless gate-only or risks require review.",
             "",
             "## Recommended next action",
             "",
@@ -171,13 +209,7 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
     )
     for cmd in meta.commands_executed:
         report_lines.append(f"- `{cmd}`")
-    report_lines.extend(
-        [
-            "",
-            "## Artifact list",
-            "",
-        ]
-    )
+    report_lines.extend(["", "## Artifact list", ""])
     for a in artifacts:
         report_lines.append(f"- `{a}`")
 
@@ -217,12 +249,9 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
             "",
             "## Need from lead",
             "",
+            f"- {need_lead}",
         ]
     )
-    if human_decision:
-        lead_lines.append("- Decision on escalated validator/product risk items.")
-    else:
-        lead_lines.append("- None unless outcome is HUMAN_DECISION_REQUIRED or gates WARN/FAIL.")
 
     lead_path = run_dir / "10_lead_update.md"
     lead_path.write_text("\n".join(lead_lines) + "\n", encoding="utf-8")
