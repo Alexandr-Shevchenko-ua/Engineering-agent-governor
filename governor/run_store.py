@@ -19,6 +19,7 @@ from governor.templates import (
     task_intake,
     validator_prompt,
 )
+from governor.index import upsert_entry
 from governor.trace import TraceLogger
 from governor.utils import (
     find_run_dir,
@@ -52,6 +53,7 @@ class RunStore:
             json.dumps(meta.to_dict(), indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+        upsert_entry(self.repo_path, meta, run_dir)
 
     def create_run(self, task: str) -> tuple[Path, RunMetadata]:
         runs_dir(self.repo_path).mkdir(parents=True, exist_ok=True)

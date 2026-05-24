@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from governor import __version__
+from governor.doctor import run_doctor
 from governor.gates import run_gates, write_gate_artifacts
+from governor.index import list_entries
 from governor.models import NEXT_ACTIONS, RunState
 from governor.report import generate_reports
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
+from governor.utils import resolve_repo_path
 
 
 def _repo_path_from_args(args: argparse.Namespace) -> str:
@@ -65,6 +69,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_report = sub.add_parser("report", help="Generate final report and lead update", parents=[parent])
     p_report.add_argument("--run-id", required=True)
+
+    p_list = sub.add_parser("list", help="List governor runs (newest first)", parents=[parent])
+    p_list.add_argument("--limit", type=int, default=None, help="Max runs to show")
+    p_list.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
+
+    p_doctor = sub.add_parser("doctor", help="Readiness check for repo and governor state", parents=[parent])
 
     return parser
 
@@ -161,6 +171,44 @@ def cmd_gate(args: argparse.Namespace) -> int:
     return 0 if report.overall != "FAIL" else 2
 
 
+def cmd_list(args: argparse.Namespace) -> int:
+    try:
+        repo = resolve_repo_path(_repo_path_from_args(args))
+        open_store(str(repo))  # ensure runs exist
+        entries = list_entries(repo, limit=args.limit)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if args.as_json:
+        print(json.dumps(entries, indent=2, ensure_ascii=False))
+        return 0
+
+    if not entries:
+        print("No runs found.")
+        return 0
+
+    print(f"{'RUN_ID':<40} {'STATE':<28} {'OUTCOME':<24} TASK")
+    print("-" * 120)
+    for e in entries:
+        outcome = e.get("outcome") or "-"
+        task = (e.get("task") or "")[:40]
+        print(
+            f"{e.get('run_id', ''):<40} {e.get('state', ''):<28} {str(outcome):<24} {task}"
+        )
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    results, code = run_doctor(_repo_path_from_args(args))
+    for r in results:
+        print(f"[{r.status:4}] {r.name}: {r.detail}")
+    return code
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     try:
         store = open_store(_repo_path_from_args(args))
@@ -193,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {
         "init": cmd_init,
         "status": cmd_status,
+        "list": cmd_list,
+        "doctor": cmd_doctor,
         "record": cmd_record,
         "gate": cmd_gate,
         "report": cmd_report,

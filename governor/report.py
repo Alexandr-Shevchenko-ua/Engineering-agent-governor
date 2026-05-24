@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from governor.models import NEXT_ACTIONS, RunState
+from governor.models import NEXT_ACTIONS, RunState, transition_state
 from governor.run_store import RunStore
 from governor.verdict import parse_validator_verdict
+
+REPORT_COMMAND_TEMPLATE = "python -m governor report --run-id {run_id}"
 
 
 def _read_optional(run_dir: Path, name: str, max_chars: int = 4000) -> str | None:
@@ -106,9 +108,12 @@ def lead_need_from_lead(
     return "Review outcome and artifacts before merge."
 
 
+def _report_command(run_id: str) -> str:
+    return REPORT_COMMAND_TEMPLATE.format(run_id=run_id)
+
+
 def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
     run_dir, meta = store.get_run(run_id)
-    artifacts = store.list_artifacts(run_dir)
 
     intake = _read_optional(run_dir, "00_task_intake.md")
     scope = _read_optional(run_dir, "01_scope_and_assumptions.md")
@@ -148,6 +153,14 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
     elif outcome in ("GATES_PASS_NO_VALIDATOR", "GATES_WARN_NO_VALIDATOR"):
         next_action = "Record validator output or obtain lead sign-off for gate-only result."
 
+    report_cmd = _report_command(run_id)
+    if report_cmd not in meta.commands_executed:
+        meta.commands_executed.append(report_cmd)
+    meta.outcome = outcome
+    meta.state = transition_state(RunState(meta.state), "report").value
+    store.save_metadata(run_dir, meta)
+
+    artifacts = store.list_artifacts(run_dir)
     git_summary = _gate_summary(run_dir)
     need_lead = lead_need_from_lead(
         verdict=verdict,
@@ -255,10 +268,5 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
 
     lead_path = run_dir / "10_lead_update.md"
     lead_path.write_text("\n".join(lead_lines) + "\n", encoding="utf-8")
-
-    meta.outcome = outcome
-    store.save_metadata(run_dir, meta)
-    store.update_state(run_id, "report")
-    store.append_command(run_id, f"python -m governor report --run-id {run_id}")
 
     return report_path, lead_path

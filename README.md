@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.1.1** is a hardened file-based harness: intake, prompts, recording, deterministic gates, and reporting.
+Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.1.2** adds run index, `list`/`doctor`, correct final-report ordering, and dogfooding docs.
 
 ## What this is
 
@@ -54,9 +54,15 @@ gov init --task "My task" --repo-path .
 |---------|---------|
 | `init` | Create timestamped run under `.governor/runs/` (creates `.governor` only here) |
 | `status` | Show latest or specific run (does not create `.governor`) |
+| `list` | List runs from `.governor/index.json` (`--limit`, `--json`) |
+| `doctor` | Readiness check (does not create `.governor`) |
 | `record` | Store outputs; executor/validator protected unless `--replace` |
 | `gate` | Run local checks → `08_gate_results.json` / `.md` |
 | `report` | Generate `09_final_report.md` and `10_lead_update.md` |
+
+**Dogfooding:** [docs/DOGFOODING.md](docs/DOGFOODING.md) — using Governor on this repo.
+
+**Smoke test:** `python scripts/smoke_governor_workflow.py`
 
 ## Manual workflow with Cursor Agent
 
@@ -113,8 +119,11 @@ python3 -m venv .venv
 .venv/bin/pytest tests/ -v
 ```
 
+## Release
+
+See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) before tagging.
+
 ## Planned v0.2
 
 - Cursor CLI / Claude Code dispatcher hooks (bounded, human-approved)
-- Run index under `.governor/`
 - Per-repo gate profiles
