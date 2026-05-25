@@ -2,22 +2,38 @@
 
 Use Governor to **manage delegated agent work** on this repository (or any target repo) without treating agent chat as the source of truth.
 
+## Run ID convention
+
+`--run-id` must be the **run folder name only** (for example `20260524T214854Z_add-indexjson-run-discovery`), not a filesystem path.
+
+- Wrong: `--run-id /home/you/project/.governor/runs/20260524T214854Z_my-task`
+- Wrong: `--run-id .governor/runs/20260524T214854Z_my-task`
+- Right: `--run-id 20260524T214854Z_my-task`
+
+Use `python -m governor list --repo-path .` to see valid run ids.
+
 ## Managing a change in this repo
 
 ```bash
-cd /home/shevchenkool/project/Engineering-agent-governor
+cd /path/to/Engineering-agent-governor
+
+export RUN_ID=20260524T214854Z_add-indexjson-run-discovery   # from `governor list`
 
 python -m governor init --task "Add index.json run discovery" --repo-path .
 python -m governor list --repo-path .
+
 # Paste .governor/runs/<run-id>/03_executor_prompt.md into Cursor Agent
-python -m governor record --run-id /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery --role executor --file /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery/output.md --repo-path /home/shevchenkool/project/Engineering-agent-governor
-python -m governor gate --run-id /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery --repo-path .
+python -m governor record --run-id "$RUN_ID" --role executor --file ./executor-output.md --repo-path .
+
+python -m governor gate --run-id "$RUN_ID" --repo-path .
+
 # Paste 04_validator_prompt.md
-python -m governor record --run-id /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery --role validator --file /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery/validator.md --repo-path .
-python -m governor report --run-id .governor/runs/20260524T214854Z_add-indexjson-run-discovery/validator.md --repo-path .
+python -m governor record --run-id "$RUN_ID" --role validator --file ./validator-output.md --repo-path .
+
+python -m governor report --run-id "$RUN_ID" --repo-path .
 ```
 
-Inspect artifacts under `.governor/runs/<run-id>/` before merging.
+Inspect artifacts under `.governor/runs/<run-id>/` before merging. That directory is **local and gitignored** — do not commit it.
 
 ## Recommended manual loop
 
@@ -38,11 +54,8 @@ Optional: `doctor` before starting; `list` / `status` anytime.
 Dispatch is optional — manual `record` still works.
 
 ```bash
-# Always preview first
-python -m governor dispatch --run-id <id> --role executor --runner echo --repo-path .
-
-# Execute only after reviewing preview
-python -m governor dispatch --run-id <id> --role executor --runner echo --approve --repo-path .
+python -m governor dispatch --run-id "$RUN_ID" --role executor --runner echo --repo-path .
+python -m governor dispatch --run-id "$RUN_ID" --role executor --runner echo --approve --repo-path .
 ```
 
 **Safe usage:**
@@ -95,7 +108,7 @@ Gate-only outcomes (`GATES_PASS_NO_VALIDATOR`, etc.) are **not** validator sign-
 3. `06_validator_output.md` — verdict + findings (adversarial)
 4. `09_final_report.md` — outcome, state `FINAL_REPORT_READY`, commands list
 5. `trace.jsonl` — audit timeline
-6. `.governor/index.json` — run discovery entry matches folder
+6. `.governor/index.json` — run discovery entry matches folder name (`run_id`)
 
 ## Example task (concrete)
 

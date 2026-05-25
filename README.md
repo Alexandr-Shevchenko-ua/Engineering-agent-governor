@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.2.1** hardens **`dispatch`** state policy, preview warnings, and non-zero exit handling.
+Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.2.2** adds run-id validation and restores repo hygiene (`.governor/` is never committed).
 
 ## What this is
 
@@ -41,6 +41,8 @@ python -m governor report --run-id <run-id> --repo-path .
 ```
 
 After `init`, state is **`EXECUTOR_PROMPT_READY`** — paste the executor prompt next.
+
+**Run ID:** use the folder name from `governor list` (e.g. `20260524T214854Z_my-task`), not a path. See [docs/DOGFOODING.md](docs/DOGFOODING.md).
 
 Optional entry point after `pip install -e .`:
 

@@ -40,7 +40,6 @@ def require_governor_runs(repo_path: Path) -> Path:
     """Return runs directory or raise if governor was never initialized here."""
     base = runs_dir(repo_path)
     if not base.is_dir():
-        root = governor_root(repo_path)
         raise FileNotFoundError(
             f"Governor runs not found at {base}. "
             f"Run 'python -m governor init --task \"...\" --repo-path {repo_path}' first."
@@ -48,3 +47,31 @@ def require_governor_runs(repo_path: Path) -> Path:
     return base
 
 
+RUN_ID_PATTERN = re.compile(r"^[0-9]{8}T[0-9]{6}Z_[a-z0-9_-]+$")
+
+_INVALID_RUN_ID_MSG = "Invalid run id: expected run folder name, not a path"
+
+
+def validate_run_id(run_id: str | None) -> str | None:
+    """
+    Validate a user-supplied run id (folder name under .governor/runs/).
+    None is allowed for latest-run resolution.
+    """
+    if run_id is None:
+        return None
+    if not isinstance(run_id, str):
+        raise ValueError(_INVALID_RUN_ID_MSG)
+    s = run_id.strip()
+    if not s or s != run_id:
+        raise ValueError(_INVALID_RUN_ID_MSG)
+    if "/" in s or "\\" in s or ".." in s:
+        raise ValueError(_INVALID_RUN_ID_MSG)
+    if Path(s).is_absolute():
+        raise ValueError(_INVALID_RUN_ID_MSG)
+    if s.startswith(".governor") or s.startswith("runs"):
+        raise ValueError(_INVALID_RUN_ID_MSG)
+    if not RUN_ID_PATTERN.match(s):
+        raise ValueError(
+            f"Invalid run id: {s!r} (expected format YYYYMMDDTHHMMSSZ_slug)"
+        )
+    return s

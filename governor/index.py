@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from governor.models import RunMetadata
-from governor.utils import governor_root, runs_dir
+from governor.utils import governor_root, runs_dir, validate_run_id
 
 INDEX_VERSION = 1
 INDEX_FILENAME = "index.json"
@@ -105,6 +105,19 @@ def list_entries(
     return runs
 
 
+def _run_dir_within_base(base: Path, candidate: Path) -> Path | None:
+    """Return resolved path if candidate is a directory under base, else None."""
+    try:
+        resolved = candidate.resolve()
+        base_resolved = base.resolve()
+        resolved.relative_to(base_resolved)
+    except (ValueError, OSError):
+        return None
+    if not resolved.is_dir():
+        return None
+    return resolved
+
+
 def find_run_dir(repo_path: Path, run_id: str | None) -> Path:
     """Resolve a run folder by id, or the newest indexed run when run_id is omitted."""
     base = runs_dir(repo_path)
@@ -114,16 +127,29 @@ def find_run_dir(repo_path: Path, run_id: str | None) -> Path:
             f"Run 'python -m governor init --task \"...\" --repo-path {repo_path}' first."
         )
 
-    if run_id:
-        run_dir = base / run_id
+    if run_id is not None:
+        validated = validate_run_id(run_id)
+        assert validated is not None
+        run_dir = base / validated
         if not run_dir.is_dir():
-            raise FileNotFoundError(f"Run not found: {run_id}")
+            raise FileNotFoundError(f"Run not found: {validated}")
         return run_dir
 
     for entry in list_entries(repo_path, limit=1):
-        run_dir = Path(entry["run_dir"])
-        if run_dir.is_dir():
-            return run_dir
+        indexed_id = entry.get("run_id")
+        if indexed_id:
+            try:
+                validated = validate_run_id(indexed_id)
+            except ValueError:
+                continue
+            run_dir = base / validated
+            if run_dir.is_dir():
+                return run_dir
+        raw_dir = entry.get("run_dir")
+        if raw_dir:
+            safe = _run_dir_within_base(base, Path(raw_dir))
+            if safe is not None:
+                return safe
 
     dirs = sorted(
         [p for p in base.iterdir() if p.is_dir()],

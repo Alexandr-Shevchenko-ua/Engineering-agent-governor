@@ -144,7 +144,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     try:
         store = open_store(_repo_path_from_args(args))
         run_dir, meta = store.get_run(args.run_id)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
@@ -194,7 +194,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
     try:
         store = open_store(_repo_path_from_args(args))
         run_dir, meta = store.get_run(args.run_id)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
@@ -337,7 +337,7 @@ def cmd_report(args: argparse.Namespace) -> int:
         print(f"Wrote: {report_p.name}, {lead_p.name}")
         print(f"State: {meta.state}")
         print(f"Outcome: {meta.outcome}")
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0

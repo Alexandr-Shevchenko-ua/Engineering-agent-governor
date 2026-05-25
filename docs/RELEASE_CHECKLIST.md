@@ -33,7 +33,9 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 
 ## Git
 
-- [ ] `git status` clean (or only intentional untracked locals like `.governor/`)
+- [ ] `git status` clean (no tracked `.governor/`)
+- [ ] `git ls-files .governor` returns nothing
+- [ ] `git check-ignore -v .governor/index.json` confirms ignore (or only intentional untracked locals like `.governor/`)
 - [ ] Commit message describes user-facing changes
 - [ ] Push to remote
 
