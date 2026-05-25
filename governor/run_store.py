@@ -22,10 +22,9 @@ from governor.templates import (
     task_intake,
     validator_prompt,
 )
-from governor.index import upsert_entry
+from governor.index import find_run_dir, upsert_entry
 from governor.trace import TraceLogger
 from governor.utils import (
-    find_run_dir,
     require_governor_runs,
     resolve_repo_path,
     runs_dir,

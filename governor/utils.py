@@ -48,18 +48,3 @@ def require_governor_runs(repo_path: Path) -> Path:
     return base
 
 
-def find_run_dir(repo_path: Path, run_id: str | None) -> Path:
-    base = require_governor_runs(repo_path)
-    if run_id:
-        run_dir = base / run_id
-        if not run_dir.is_dir():
-            raise FileNotFoundError(f"Run not found: {run_id}")
-        return run_dir
-    dirs = sorted(
-        [p for p in base.iterdir() if p.is_dir()],
-        key=lambda p: p.name,
-        reverse=True,
-    )
-    if not dirs:
-        raise FileNotFoundError(f"No runs found under {base}")
-    return dirs[0]

@@ -10,11 +10,11 @@ cd /home/shevchenkool/project/Engineering-agent-governor
 python -m governor init --task "Add index.json run discovery" --repo-path .
 python -m governor list --repo-path .
 # Paste .governor/runs/<run-id>/03_executor_prompt.md into Cursor Agent
-python -m governor record --run-id <run-id> --role executor --file /path/to/output.md --repo-path .
-python -m governor gate --run-id <run-id> --repo-path .
+python -m governor record --run-id /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery --role executor --file /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery/output.md --repo-path /home/shevchenkool/project/Engineering-agent-governor
+python -m governor gate --run-id /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery --repo-path .
 # Paste 04_validator_prompt.md
-python -m governor record --run-id <run-id> --role validator --file /path/to/validator.md --repo-path .
-python -m governor report --run-id <run-id> --repo-path .
+python -m governor record --run-id /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery --role validator --file /home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260524T214854Z_add-indexjson-run-discovery/validator.md --repo-path .
+python -m governor report --run-id .governor/runs/20260524T214854Z_add-indexjson-run-discovery/validator.md --repo-path .
 ```
 
 Inspect artifacts under `.governor/runs/<run-id>/` before merging.

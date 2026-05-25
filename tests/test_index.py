@@ -6,7 +6,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from governor.index import index_path, list_entries, load_index, rebuild_index
+from governor.index import find_run_dir, index_path, list_entries, load_index, rebuild_index
 from governor.run_store import RunStore
 
 
@@ -41,3 +41,13 @@ def test_list_entries_newest_first():
         entries = list_entries(repo)
         assert len(entries) >= 2
         assert entries[0]["run_id"] >= entries[1]["run_id"]
+
+
+def test_find_run_dir_uses_index_for_latest():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        store = RunStore(repo)
+        store.create_run("First")
+        store.create_run("Second")
+        indexed_latest = Path(list_entries(repo, limit=1)[0]["run_dir"])
+        assert find_run_dir(repo, None) == indexed_latest
