@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-**v1.1.0** — local control plane (Cursor Headless executor + Chatbang Governor Advisor) for agent-delegated engineering: auditable runs, gates, plans, evidence, and review packages. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
+**v1.2.0** — local control plane (Cursor Headless executor, Chatbang Governor Advisor, **experimental Chatbang Governor Mode**) for agent-delegated engineering: auditable runs, gates, plans, evidence, and review packages. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
 
 ## Not autopilot
 
@@ -70,6 +70,7 @@ Human → governor CLI → .governor/runs/<run-id>/artifacts
 | Agents | `dispatch`, `record`, `repair`, `plan` |
 | Handoff | `evidence`, `review` |
 | Config | `config`, `project`, `policy`, `version` |
+| Experimental | `governor propose`, `validate`, `apply` (chatbang planner) |
 
 Full reference: **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)**
 

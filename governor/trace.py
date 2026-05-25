@@ -29,10 +29,16 @@ class TraceEvent:
 
 
 class TraceLogger:
-    def __init__(self, run_dir: Path, run_id: str) -> None:
+    def __init__(
+        self,
+        run_dir: Path,
+        run_id: str,
+        *,
+        trace_filename: str = "trace.jsonl",
+    ) -> None:
         self.run_dir = run_dir
         self.run_id = run_id
-        self.path = run_dir / "trace.jsonl"
+        self.path = run_dir / trace_filename
 
     def append(
         self,

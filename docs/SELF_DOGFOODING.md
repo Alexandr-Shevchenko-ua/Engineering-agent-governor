@@ -23,6 +23,7 @@ For full smoke coverage (slower):
 
 ```bash
 python -m governor check --repo-path . --smoke
+python scripts/smoke_chatbang_governor_mode_workflow.py
 ```
 
 Expected: `Governor check: PASS` and `SELF DOGFOOD OK`.

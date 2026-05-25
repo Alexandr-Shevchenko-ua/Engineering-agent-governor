@@ -109,6 +109,64 @@ def _close_child(child, *, send_interrupt: bool = True) -> None:
         pass
 
 
+def run_chatbang_with_session_prime(
+    prompt: str,
+    *,
+    session_prime: str,
+    command: str = "chatbang",
+    timeout: int = 180,
+    prompt_pattern: str = "> ",
+    max_output_chars: int = 20000,
+) -> ChatbangResult:
+    """Prime chatbang session (one line), then send the main prompt; return second response."""
+    pexpect = _import_pexpect()
+    start = time.monotonic()
+    child = None
+    prime_line = session_prime.strip().splitlines()[-1] if session_prime.strip() else ""
+    try:
+        child = _spawn_process(pexpect, command, timeout)
+        child.expect(prompt_pattern, timeout=timeout)
+        child.sendline(prime_line)
+        child.expect(prompt_pattern, timeout=timeout)
+        if "\n" in prompt.rstrip("\n"):
+            child.send(prompt if prompt.endswith("\n") else prompt + "\n")
+        else:
+            child.sendline(prompt.strip())
+        child.expect(prompt_pattern, timeout=timeout)
+        raw = child.before or ""
+        for chunk in (prompt, prime_line):
+            if chunk:
+                raw = _strip_echoed_prompt(raw, chunk)
+        output = redact(_truncate(raw.strip(), max_output_chars))
+        _close_child(child)
+        duration = time.monotonic() - start
+        return ChatbangResult(
+            ok=bool(output.strip()),
+            output=output,
+            duration_seconds=duration,
+            exit_status=None,
+        )
+    except pexpect.TIMEOUT:
+        duration = time.monotonic() - start
+        _close_child(child)
+        return ChatbangResult(
+            ok=False,
+            output="",
+            duration_seconds=duration,
+            timed_out=True,
+            error="chatbang timed out (session prime + propose)",
+        )
+    except Exception as e:
+        duration = time.monotonic() - start
+        _close_child(child)
+        return ChatbangResult(
+            ok=False,
+            output="",
+            duration_seconds=duration,
+            error=str(e),
+        )
+
+
 def run_chatbang_once(
     prompt: str,
     *,

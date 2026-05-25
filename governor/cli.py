@@ -73,6 +73,16 @@ from governor.governed_run import (
     print_run_summary,
 )
 from governor.advisor import ADVISOR_KINDS, ask_advisor
+from governor.governor_mode import (
+    PROPOSAL_MD,
+    apply_proposal,
+    list_proposals,
+    load_proposal,
+    propose_governor_mode,
+    reject_proposal,
+    render_proposal_markdown,
+    validate_proposal,
+)
 from governor.check import check_exit_code, run_check
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
@@ -533,6 +543,97 @@ def _build_parser() -> argparse.ArgumentParser:
             action="store_true",
             help="Allow advisor ask when final report already exists",
         )
+
+    p_governor_mode = sub.add_parser(
+        "governor",
+        help="Experimental Chatbang Governor Mode (propose/validate/apply; not autopilot)",
+        parents=[parent],
+    )
+    gov_sub = p_governor_mode.add_subparsers(dest="governor_cmd", required=True)
+
+    p_gov_propose = gov_sub.add_parser(
+        "propose",
+        help="Chatbang proposes a bounded Governor run (no run created)",
+        parents=[parent],
+    )
+    p_gov_propose.add_argument("--task", required=True)
+    p_gov_propose.add_argument("--policy", default=None, metavar="NAME")
+    p_gov_propose.add_argument(
+        "--provider",
+        default="chatbang",
+        choices=["chatbang"],
+        help="Proposal provider (chatbang only in v1.2)",
+    )
+    p_gov_propose.add_argument("--question", default=None, help="Extra instruction for chatbang")
+    p_gov_propose.add_argument(
+        "--chatbang-command",
+        default="chatbang",
+        help="Chatbang executable command",
+    )
+    p_gov_propose.add_argument("--timeout", type=int, default=300, help="Seconds (max 900)")
+    p_gov_propose.add_argument("--max-output-chars", type=int, default=30000)
+    p_gov_propose.add_argument("--dry-run", action="store_true")
+    p_gov_propose.add_argument(
+        "--include-repo-summary",
+        action="store_true",
+        help="Include extra repo metadata in prompt",
+    )
+    p_gov_propose.add_argument(
+        "--experimental-allow-wide-context",
+        action="store_true",
+        help="Include redacted profile argv in context",
+    )
+    p_gov_propose.add_argument("--json", action="store_true", dest="as_json")
+
+    p_gov_validate = gov_sub.add_parser(
+        "validate",
+        help="Validate proposal safety and schema",
+        parents=[parent],
+    )
+    p_gov_validate.add_argument("--proposal", required=True)
+    p_gov_validate.add_argument("--force-unstructured", action="store_true")
+    p_gov_validate.add_argument("--json", action="store_true", dest="as_json")
+
+    p_gov_list = gov_sub.add_parser(
+        "list",
+        help="List local Governor proposals",
+        parents=[parent],
+    )
+    p_gov_list.add_argument("--json", action="store_true", dest="as_json")
+
+    p_gov_show = gov_sub.add_parser(
+        "show",
+        help="Show proposal markdown summary",
+        parents=[parent],
+    )
+    p_gov_show.add_argument("--proposal", required=True)
+    p_gov_show.add_argument("--json", action="store_true", dest="as_json")
+
+    p_gov_reject = gov_sub.add_parser(
+        "reject",
+        help="Mark proposal REJECTED",
+        parents=[parent],
+    )
+    p_gov_reject.add_argument("--proposal", required=True)
+    p_gov_reject.add_argument("--reason", required=True)
+
+    p_gov_apply = gov_sub.add_parser(
+        "apply",
+        help="Apply proposal → run + plan (requires --approve; no execution by default)",
+        parents=[parent],
+    )
+    p_gov_apply.add_argument("--proposal", required=True)
+    p_gov_apply.add_argument("--approve", action="store_true")
+    p_gov_apply.add_argument("--dry-run", action="store_true")
+    p_gov_apply.add_argument("--executor-profile", default=None)
+    p_gov_apply.add_argument("--validator-profile", default=None)
+    p_gov_apply.add_argument("--policy", default=None, dest="policy_override")
+    p_gov_apply.add_argument("--with-evidence", action="store_true")
+    p_gov_apply.add_argument("--with-review-package", action="store_true")
+    p_gov_apply.add_argument("--continue-on-gate-warn", action="store_true")
+    p_gov_apply.add_argument("--no-execute", action="store_true", help="Default in v1.2 (no-op)")
+    p_gov_apply.add_argument("--force-unstructured", action="store_true")
+    p_gov_apply.add_argument("--json", action="store_true", dest="as_json")
 
     p_advisor = sub.add_parser(
         "advisor",
@@ -1515,6 +1616,160 @@ def _run_advisor_ask(args: argparse.Namespace, *, kind_override: str | None = No
     return 1
 
 
+def cmd_governor_propose(args: argparse.Namespace) -> int:
+    timeout = min(max(args.timeout, 30), 900)
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    try:
+        result = propose_governor_mode(
+            repo,
+            args.task,
+            provider=args.provider,
+            policy_hint=args.policy,
+            extra_question=args.question,
+            chatbang_command=args.chatbang_command,
+            timeout=timeout,
+            max_output_chars=max(1000, min(args.max_output_chars, 50_000)),
+            dry_run=args.dry_run,
+            include_repo_summary=args.include_repo_summary,
+            experimental_wide=args.experimental_allow_wide_context,
+        )
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if not result.ok:
+        print(f"Error: {result.error}", file=sys.stderr)
+        return 1
+    payload = {
+        "proposal_id": result.proposal_id,
+        "proposal_dir": str(result.proposal_dir),
+        "dry_run": result.dry_run,
+    }
+    if args.as_json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        print(f"Proposal: {result.proposal_id}")
+        print(f"Folder: {result.proposal_dir}")
+        if result.dry_run:
+            print("Dry-run: prompt preview only (propose_prompt_preview.md)")
+    return 0
+
+
+def cmd_governor_validate(args: argparse.Namespace) -> int:
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    try:
+        result = validate_proposal(
+            repo,
+            args.proposal,
+            force_unstructured=args.force_unstructured,
+        )
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "proposal_id": result.proposal_id,
+                    "ok": result.ok,
+                    "warnings_only": result.warnings_only,
+                    "decisions": [d.to_dict() for d in result.decisions],
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+    else:
+        for d in result.decisions:
+            print(f"[{d.status}] {d.check}: {d.message}")
+        print(f"Validation: {'PASS' if result.ok else 'FAIL'}")
+    return 0 if result.ok else 1
+
+
+def cmd_governor_list(args: argparse.Namespace) -> int:
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    entries = list_proposals(repo)
+    if args.as_json:
+        print(json.dumps(entries, indent=2, ensure_ascii=False))
+        return 0
+    if not entries:
+        print("No proposals found under .governor/proposals/")
+        return 0
+    for e in entries:
+        print(
+            f"{e['proposal_id']}  {e['status']:8}  {e['confidence']:6}  {e['created_at']}  {e['task']}"
+        )
+    return 0
+
+
+def cmd_governor_show(args: argparse.Namespace) -> int:
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    try:
+        pdir, proposal = load_proposal(repo, args.proposal)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(proposal.to_dict(), indent=2, ensure_ascii=False))
+        return 0
+    md_path = pdir / PROPOSAL_MD
+    if md_path.is_file():
+        print(md_path.read_text(encoding="utf-8"))
+    else:
+        print(render_proposal_markdown(proposal))
+    return 0
+
+
+def cmd_governor_reject(args: argparse.Namespace) -> int:
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    try:
+        proposal = reject_proposal(repo, args.proposal, args.reason)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    print(f"Rejected proposal: {proposal.proposal_id}")
+    return 0
+
+
+def cmd_governor_apply(args: argparse.Namespace) -> int:
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    try:
+        result = apply_proposal(
+            repo,
+            args.proposal,
+            approve=args.approve,
+            dry_run=args.dry_run,
+            force_unstructured=args.force_unstructured,
+            executor_profile=args.executor_profile,
+            validator_profile=args.validator_profile,
+            policy_override=args.policy_override,
+            with_evidence=args.with_evidence,
+            with_review_package=args.with_review_package,
+            continue_on_gate_warn=args.continue_on_gate_warn,
+        )
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "proposal_id": result.proposal_id,
+                    "run_id": result.run_id,
+                    "ok": result.ok,
+                    "approved": result.approved,
+                    "dry_run": result.dry_run,
+                    "error": result.error,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+    if not result.ok and result.error:
+        print(f"Error: {result.error}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_advisor_ask(args: argparse.Namespace) -> int:
     return _run_advisor_ask(args)
 
@@ -1636,6 +1891,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "advisor":
         if args.advisor_cmd == "ask":
             return cmd_advisor_ask(args)
+    if args.command == "governor":
+        gov_handlers = {
+            "propose": cmd_governor_propose,
+            "validate": cmd_governor_validate,
+            "list": cmd_governor_list,
+            "show": cmd_governor_show,
+            "reject": cmd_governor_reject,
+            "apply": cmd_governor_apply,
+        }
+        return gov_handlers[args.governor_cmd](args)
     return handlers[args.command](args)
 
 

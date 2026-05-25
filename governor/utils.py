@@ -36,6 +36,15 @@ def runs_dir(repo_path: Path) -> Path:
     return governor_root(repo_path) / "runs"
 
 
+def proposals_dir(repo_path: Path) -> Path:
+    return governor_root(repo_path) / "proposals"
+
+
+def validate_proposal_id(proposal_id: str | None) -> str | None:
+    """Same rules as run_id — proposals live under .governor/proposals/."""
+    return validate_run_id(proposal_id)
+
+
 def require_governor_runs(repo_path: Path) -> Path:
     """Return runs directory or raise if governor was never initialized here."""
     base = runs_dir(repo_path)

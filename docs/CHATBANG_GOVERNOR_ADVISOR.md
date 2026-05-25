@@ -82,3 +82,13 @@ Uses `scripts/fake_chatbang.py`, not real chatbang.
 Your working pattern: `pexpect.spawn("chatbang")` → `expect("> ")` → `sendline(msg)` → read until next prompt. Governor's `governor/chatbang_bridge.py` implements this with timeout, redaction, and safe child teardown.
 
 See `scripts/chatbang_run_example.py` for a minimal standalone sample (not used by Governor at runtime).
+
+## vs Chatbang Governor Mode (v1.2)
+
+| | `advisor ask` | `governor propose` |
+|---|----------------|-------------------|
+| When | Existing run | New task |
+| Output | `16_advisor_*` in run folder | `.governor/proposals/<id>/` |
+| Creates run | No | Only on `governor apply --approve` |
+
+Governor Mode is **experimental** planning — see [CHATBANG_GOVERNOR_MODE.md](CHATBANG_GOVERNOR_MODE.md).

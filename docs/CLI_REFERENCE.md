@@ -353,6 +353,27 @@ See [CHATBANG_GOVERNOR_ADVISOR.md](CHATBANG_GOVERNOR_ADVISOR.md).
 
 ---
 
+## governor (experimental — Chatbang Governor Mode)
+
+chatbang proposes a bounded run; Governor validates; human `--approve` apply. **Does not** execute Cursor or change the git tree on propose/apply.
+
+```bash
+python -m governor governor propose --task "..." --provider chatbang --repo-path .
+python -m governor governor validate --proposal <id> --repo-path .
+python -m governor governor show --proposal <id> --repo-path .
+python -m governor governor reject --proposal <id> --reason "..." --repo-path .
+python -m governor governor apply --proposal <id> --repo-path .
+python -m governor governor apply --proposal <id> --approve --repo-path .
+```
+
+**Artifacts:** `.governor/proposals/<id>/` (`proposal.json`, `proposal.md`, `raw_chatbang_response.md`)
+
+Apply (v1.2) creates **run + plan only** — use `governor run resume --approve` to execute.
+
+See [CHATBANG_GOVERNOR_MODE.md](CHATBANG_GOVERNOR_MODE.md).
+
+---
+
 ## review
 
 Review / PR handoff package.

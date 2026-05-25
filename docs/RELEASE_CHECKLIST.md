@@ -27,6 +27,8 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 - [ ] `python scripts/smoke_resume_checkpoint_evidence_workflow.py` — V06 SMOKE OK
 - [ ] `python scripts/smoke_policy_workflow.py` — POLICY SMOKE OK
 - [ ] `python scripts/smoke_governed_run_workflow.py` — GOVERNED RUN SMOKE OK
+- [ ] `python scripts/smoke_chatbang_advisor_workflow.py` — CHATBANG ADVISOR SMOKE OK
+- [ ] `python scripts/smoke_chatbang_governor_mode_workflow.py` — CHATBANG GOVERNOR MODE SMOKE OK
 - [ ] `python -m governor run start --help`
 - [ ] `python -m governor policy list` / `policy show --policy bugfix`
 - [ ] `repair prepare` / `dispatch --role repair` manual spot-check documented
