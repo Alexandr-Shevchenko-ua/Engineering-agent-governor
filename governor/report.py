@@ -11,6 +11,7 @@ from governor.repair_artifacts import (
     list_repair_outputs,
     list_repair_prompts,
 )
+from governor.run_plan import load_plan, plan_json_path, plan_status_summary
 from governor.run_store import RunStore
 from governor.verdict import parse_validator_verdict
 
@@ -227,6 +228,41 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
             "- **Caution:** repair recorded; re-run `gate` before trusting outcome."
         )
     report_lines.append("")
+
+    if plan_json_path(run_dir).is_file():
+        try:
+            plan = load_plan(run_dir)
+            counts = plan_status_summary(plan)
+            summary_parts = [f"{k}={v}" for k, v in sorted(counts.items())]
+            report_lines.extend(
+                [
+                    "## Run plan",
+                    "",
+                    f"- Overall plan status: **{plan.overall_status}**",
+                    f"- Step counts: {', '.join(summary_parts)}",
+                    f"- Executor profile: {plan.executor_profile or '(runner)'}",
+                    f"- Validator profile: {plan.validator_profile or '(runner)'}",
+                    f"- Reached report step: "
+                    + (
+                        "yes"
+                        if any(
+                            s.step_id == "report" and s.status == "PASS"
+                            for s in plan.steps
+                        )
+                        else "no"
+                    ),
+                ]
+            )
+            failed_steps = [
+                s for s in plan.steps if s.status in ("FAIL", "BLOCKED") and s.reason
+            ]
+            if failed_steps:
+                report_lines.append("- Failed/blocked steps:")
+                for s in failed_steps:
+                    report_lines.append(f"  - `{s.step_id}` ({s.status}): {s.reason}")
+            report_lines.append("")
+        except (FileNotFoundError, ValueError, json.JSONDecodeError):
+            report_lines.extend(["## Run plan", "", "_Plan file present but unreadable._", ""])
 
     report_lines.extend(
         [

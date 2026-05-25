@@ -49,6 +49,15 @@ Inspect artifacts under `.governor/runs/<run-id>/` before merging. That director
 
 Optional: `doctor` before starting; `list` / `status` anytime.
 
+## Run plans (v0.5)
+
+See [RUN_PLANS.md](RUN_PLANS.md). Bounded orchestration — **not** autopilot.
+
+```bash
+python -m governor plan create --run-id "$RUN_ID" --executor-profile echo-test --validator-profile fake-validator --repo-path .
+python -m governor plan execute --run-id "$RUN_ID" --approve --repo-path .
+```
+
 ## Repair workflow (v0.4)
 
 See [REPAIR_WORKFLOW.md](REPAIR_WORKFLOW.md). Summary: `repair prepare` → preview/approve `dispatch --role repair` → **manual** `gate` again.
@@ -156,4 +165,5 @@ python scripts/smoke_governor_workflow.py
 python scripts/smoke_dispatch_workflow.py
 python scripts/smoke_profile_workflow.py
 python scripts/smoke_repair_workflow.py
+python scripts/smoke_plan_workflow.py
 ```

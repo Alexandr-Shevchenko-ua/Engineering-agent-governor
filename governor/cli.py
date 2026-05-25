@@ -31,6 +31,17 @@ from governor.index import list_entries
 from governor.models import NEXT_ACTIONS, RunState
 from governor.repair import list_repair_artifacts, prepare_repair
 from governor.report import generate_reports
+from governor.run_plan import (
+    APPROVE_REQUIRED_MSG,
+    PLAN_JSON,
+    create_plan,
+    execute_plan,
+    load_plan,
+    next_pending_step,
+    plan_json_path,
+    plan_status_summary,
+    render_plan_markdown,
+)
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
 from governor.utils import resolve_repo_path
@@ -215,6 +226,75 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_rep_list.add_argument("--run-id", required=True)
 
+    p_plan = sub.add_parser(
+        "plan",
+        help="Bounded run plan orchestrator (explicit steps, --approve for dispatch)",
+        parents=[parent],
+    )
+    plan_sub = p_plan.add_subparsers(dest="plan_cmd", required=True)
+
+    p_plan_create = plan_sub.add_parser("create", help="Write 12_run_plan.json", parents=[parent])
+    p_plan_create.add_argument("--run-id", required=True)
+    p_plan_create.add_argument("--executor-profile", default=None)
+    p_plan_create.add_argument("--validator-profile", default=None)
+    p_plan_create.add_argument(
+        "--executor-runner",
+        choices=["echo", "command", "cursor"],
+        default=None,
+    )
+    p_plan_create.add_argument(
+        "--validator-runner",
+        choices=["echo", "command", "cursor"],
+        default=None,
+    )
+    p_plan_create.add_argument(
+        "--executor-command",
+        dest="executor_command",
+        nargs="*",
+        default=None,
+        metavar="ARG",
+    )
+    p_plan_create.add_argument(
+        "--validator-command",
+        dest="validator_command",
+        nargs="*",
+        default=None,
+        metavar="ARG",
+    )
+    p_plan_create.add_argument(
+        "--auto-repair-prepare-on-fail",
+        action="store_true",
+        help="On gate/validator fail, run repair prepare then stop (no repair dispatch)",
+    )
+    p_plan_create.add_argument("--force", action="store_true")
+    p_plan_create.add_argument("--dry-run", action="store_true")
+
+    p_plan_show = plan_sub.add_parser("show", help="Show plan steps", parents=[parent])
+    p_plan_show.add_argument("--run-id", required=True)
+    p_plan_show.add_argument("--json", action="store_true", dest="as_json")
+
+    p_plan_exec = plan_sub.add_parser(
+        "execute",
+        help="Execute plan steps sequentially (bounded)",
+        parents=[parent],
+    )
+    p_plan_exec.add_argument("--run-id", required=True)
+    p_plan_exec.add_argument(
+        "--approve",
+        action="store_true",
+        help="Required to run dispatch steps in the plan",
+    )
+    p_plan_exec.add_argument("--until", default=None, metavar="STEP_ID")
+    p_plan_exec.add_argument("--dry-run", action="store_true")
+    p_plan_exec.add_argument(
+        "--continue-on-gate-warn",
+        action="store_true",
+        help="Continue plan when gate returns WARN (default: stop on WARN)",
+    )
+    p_plan_exec.add_argument("--replace", action="store_true")
+    p_plan_exec.add_argument("--accept-failed-output", action="store_true")
+    p_plan_exec.add_argument("--max-steps", type=int, default=10)
+
     return parser
 
 
@@ -246,6 +326,17 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Outcome:    {meta.outcome or '(pending)'}")
     print(f"Repair:     count={meta.repair_count} prompts={getattr(meta, 'repair_prompt_count', 0)}")
     print(f"Artifacts:  {', '.join(artifacts)}")
+    if plan_json_path(run_dir).is_file():
+        try:
+            plan = load_plan(run_dir)
+            counts = plan_status_summary(plan)
+            parts = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+            print(f"Plan:       exists ({plan.overall_status}; {parts})")
+            nxt = next_pending_step(plan)
+            if nxt:
+                print(f"Next plan:  {nxt.step_id} ({nxt.action})")
+        except (FileNotFoundError, ValueError, json.JSONDecodeError):
+            print("Plan:       present but unreadable")
     print(f"Next:       {NEXT_ACTIONS.get(RunState(meta.state), 'See run_state.json')}")
     return 0
 
@@ -563,6 +654,80 @@ def cmd_config_validate(args: argparse.Namespace) -> int:
     return 1 if has_fail else 0
 
 
+def cmd_plan_create(args: argparse.Namespace) -> int:
+    try:
+        store = open_store(_repo_path_from_args(args))
+        plan = create_plan(
+            store,
+            args.run_id,
+            executor_profile=args.executor_profile,
+            executor_runner=args.executor_runner,
+            executor_command=args.executor_command,
+            validator_profile=args.validator_profile,
+            validator_runner=args.validator_runner,
+            validator_command=args.validator_command,
+            auto_repair_prepare_on_fail=args.auto_repair_prepare_on_fail,
+            force=args.force,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            print(render_plan_markdown(plan))
+            print("(dry-run: plan not written)")
+            return 0
+        print(f"Wrote: {PLAN_JSON}, 12_run_plan.md")
+        print(f"Steps: {len(plan.steps)}")
+        for s in plan.steps:
+            if s.action == "stop":
+                continue
+            print(f"  - {s.step_id}: {s.action}")
+        return 0
+    except (FileNotFoundError, FileExistsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_plan_show(args: argparse.Namespace) -> int:
+    try:
+        store = open_store(_repo_path_from_args(args))
+        run_dir, _ = store.get_run(args.run_id)
+        plan = load_plan(run_dir)
+        if args.as_json:
+            print(json.dumps(plan.to_dict(), indent=2, ensure_ascii=False))
+            return 0
+        print(render_plan_markdown(plan))
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_plan_execute(args: argparse.Namespace) -> int:
+    repo_path = _repo_path_from_args(args)
+    try:
+        store = open_store(repo_path)
+        result = execute_plan(
+            store,
+            args.run_id,
+            approve=args.approve,
+            until=args.until,
+            dry_run=args.dry_run,
+            stop_on_warn=False if args.continue_on_gate_warn else None,
+            continue_on_gate_warn=args.continue_on_gate_warn,
+            replace=args.replace,
+            accept_failed_output=args.accept_failed_output,
+            max_steps=args.max_steps,
+            repo_path=repo_path,
+        )
+        if result.message == APPROVE_REQUIRED_MSG:
+            print(APPROVE_REQUIRED_MSG, file=sys.stderr)
+            return result.exit_code
+        print(result.message)
+        return result.exit_code
+    except (FileNotFoundError, FileExistsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_config_path(args: argparse.Namespace) -> int:
     repo = resolve_repo_path(_repo_path_from_args(args))
     print(config_path(repo))
@@ -599,6 +764,13 @@ def main(argv: list[str] | None = None) -> int:
             "list": cmd_repair_list,
         }
         return repair_handlers[args.repair_cmd](args)
+    if args.command == "plan":
+        plan_handlers = {
+            "create": cmd_plan_create,
+            "show": cmd_plan_show,
+            "execute": cmd_plan_execute,
+        }
+        return plan_handlers[args.plan_cmd](args)
     return handlers[args.command](args)
 
 

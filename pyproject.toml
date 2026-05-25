@@ -1,6 +1,6 @@
 [project]
 name = "engineering-agent-governor"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local delegation-first engineering governor harness"
 readme = "README.md"
 requires-python = ">=3.11"
