@@ -1,4 +1,6 @@
-# Release checklist (Governor)
+# Release checklist
+
+For **v1.0.0-rc1** also run `python -m governor check --repo-path .`, `python scripts/self_dogfood_release_check.py`, and see [RELEASE_NOTES_v1.0.0-rc1.md](RELEASE_NOTES_v1.0.0-rc1.md). (Governor)
 
 Use before tagging a release. **Do not create tags automatically** from this doc alone.
 
@@ -6,7 +8,12 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 
 - [ ] Bump `governor/__init__.py` `__version__`
 - [ ] Bump `pyproject.toml` `version`
-- [ ] README mentions correct version (e.g. v0.8.0)
+- [ ] README mentions correct version (e.g. v1.0.0-rc1)
+- [ ] `python -m governor version` / `version --json`
+- [ ] `python -m governor check --repo-path .` (and `--smoke` before tag)
+- [ ] `python scripts/self_dogfood_release_check.py`
+- [ ] `python -m governor project validate --repo-path .`
+- [ ] `python scripts/smoke_project_governance_workflow.py`
 
 ## Tests and smoke
 

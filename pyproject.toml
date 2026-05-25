@@ -1,12 +1,41 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "engineering-agent-governor"
-version = "0.9.0"
+version = "1.0.0rc1"
 description = "Local delegation-first engineering governor harness"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [{ name = "Engineering Agent Governor contributors" }]
+keywords = ["governance", "agents", "engineering", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
 
 [project.scripts]
 gov = "governor.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Alexandr-Shevchenko-ua/Engineering-agent-governor"
+Repository = "https://github.com/Alexandr-Shevchenko-ua/Engineering-agent-governor"
+Documentation = "https://github.com/Alexandr-Shevchenko-ua/Engineering-agent-governor#readme"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["governor*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

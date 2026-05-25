@@ -66,6 +66,17 @@ def test_project_validate_valid_config():
     assert not any(l.level == "FAIL" for l in lines)
 
 
+def test_default_project_config_loads():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        from governor.project_config import init_project_config, load_project_config
+
+        init_project_config(repo)
+        cfg = load_project_config(repo)
+        assert cfg.default_gate_profile == "fast"
+        assert "agentic-tooling" in cfg.allowed_policies
+
+
 def test_invalid_policy_fails_validation():
     data = default_project_config_dict()
     data["allowed_policies"] = ["not-a-real-policy"]

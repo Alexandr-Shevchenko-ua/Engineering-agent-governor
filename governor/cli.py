@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import sys
 from pathlib import Path
 
@@ -71,6 +72,7 @@ from governor.governed_run import (
     governed_run_start,
     print_run_summary,
 )
+from governor.check import check_exit_code, run_check
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
 from governor.utils import resolve_repo_path
@@ -94,12 +96,38 @@ def _build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="governor",
-        description="Engineering Agent Governor — local delegation-first control plane.",
+        description=(
+            "Engineering Agent Governor — local delegation-first control plane. "
+            "Not autopilot: dispatch and plan execution require explicit --approve."
+        ),
         parents=[parent],
     )
-    parser.add_argument("--version", action="version", version=f"governor {__version__}")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"governor {__version__}",
+        help="Print version and exit",
+    )
 
-    sub = parser.add_subparsers(dest="command", required=False)
+    sub = parser.add_subparsers(dest="command", required=False, metavar="COMMAND")
+
+    p_version = sub.add_parser(
+        "version",
+        help="Show package version and runtime info",
+    )
+    p_version.add_argument("--json", action="store_true", help="JSON output")
+
+    p_check = sub.add_parser(
+        "check",
+        help="Meta-check for Governor repo health (validate, gitignore, tests)",
+        parents=[parent],
+    )
+    p_check.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Also run scripts/smoke_*.py from the Governor package",
+    )
+    p_check.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
 
     p_init = sub.add_parser("init", help="Create a new governor run", parents=[parent])
     p_init.add_argument("--task", required=True, help="Task title / objective")
@@ -129,8 +157,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing executor/validator output (default: protect audit trail)",
     )
 
-    p_gate = sub.add_parser("gate", help="Run deterministic local gates", parents=[parent])
-    p_gate.add_argument("--run-id", required=True)
+    p_gate = sub.add_parser(
+        "gate",
+        help="Run deterministic local gates on target repo (requires prior run)",
+        parents=[parent],
+    )
+    p_gate.add_argument("--run-id", required=True, help="Run folder name under .governor/runs/")
     p_gate.add_argument(
         "--profile",
         default=None,
@@ -409,7 +441,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_plan_exec.add_argument(
         "--continue-on-gate-warn",
         action="store_true",
-        help="Continue plan when gate returns WARN (default: stop on WARN)",
+        help="Treat gate WARN as non-blocking (default: stop plan on WARN)",
     )
     p_plan_exec.add_argument("--replace", action="store_true")
     p_plan_exec.add_argument("--accept-failed-output", action="store_true")
@@ -477,6 +509,7 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "--continue-on-gate-warn",
             action="store_true",
+            help="Continue when gate step returns WARN (not FAIL)",
         )
         p.add_argument("--replace", action="store_true")
         p.add_argument("--accept-failed-output", action="store_true")
@@ -1382,6 +1415,33 @@ def cmd_run_resume(args: argparse.Namespace) -> int:
     return result.exit_code
 
 
+def cmd_version(args: argparse.Namespace) -> int:
+    payload = {
+        "version": __version__,
+        "package": "engineering-agent-governor",
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+    print(f"governor {payload['version']}")
+    print(f"Python {payload['python_version']}")
+    print(f"Platform {payload['platform']}")
+    return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    summary = run_check(_repo_path_from_args(args), run_smoke=args.smoke)
+    if args.as_json:
+        print(json.dumps(summary.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(f"Governor check: {summary.overall}")
+        for r in summary.results:
+            print(f"  [{r.status:4}] {r.name}: {r.detail}")
+    return check_exit_code(summary)
+
+
 def cmd_config_path(args: argparse.Namespace) -> int:
     repo = resolve_repo_path(_repo_path_from_args(args))
     print(config_path(repo))
@@ -1403,6 +1463,8 @@ def main(argv: list[str] | None = None) -> int:
         "record": cmd_record,
         "gate": cmd_gate,
         "report": cmd_report,
+        "version": cmd_version,
+        "check": cmd_check,
     }
     if args.command == "config":
         config_handlers = {

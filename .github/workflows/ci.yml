@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Verify version
+        run: python -m governor --version
+
+      - name: Pytest
+        run: pytest tests/ -v --tb=short
+
+      - name: Smoke workflows
+        run: |
+          python scripts/smoke_governor_workflow.py
+          python scripts/smoke_dispatch_workflow.py
+          python scripts/smoke_profile_workflow.py
+          python scripts/smoke_repair_workflow.py
+          python scripts/smoke_plan_workflow.py
+          python scripts/smoke_resume_checkpoint_evidence_workflow.py
+          python scripts/smoke_policy_workflow.py
+          python scripts/smoke_governed_run_workflow.py
+          python scripts/smoke_project_governance_workflow.py
