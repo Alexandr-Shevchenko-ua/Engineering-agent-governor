@@ -138,7 +138,7 @@ python -m governor config init --repo-path .
 python -m governor dispatch --run-id <id> --role executor --profile echo-test --approve --repo-path .
 ```
 
-See [RUNNER_PROFILES.md](RUNNER_PROFILES.md).
+See [RUNNER_PROFILES.md](RUNNER_PROFILES.md) and [RUNNER_PROFILE_LOCAL_SETUP.md](RUNNER_PROFILE_LOCAL_SETUP.md).
 
 ---
 

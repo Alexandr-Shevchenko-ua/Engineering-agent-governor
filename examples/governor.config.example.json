@@ -21,10 +21,17 @@
       "timeout": 900,
       "enabled": false
     },
+    "chatbang-local": {
+      "runner": "command",
+      "description": "Chatbang — verify stdin/prompt contract locally before enabling.",
+      "argv": [],
+      "timeout": 900,
+      "enabled": false
+    },
     "claude-local": {
       "runner": "command",
-      "description": "User-configured local CLI. Fill argv locally; never put secrets in argv.",
-      "argv": [],
+      "description": "Claude Code -p (prompt on stdin). Enable only when auth works; no secrets in argv.",
+      "argv": ["claude", "-p", "--output-format", "text"],
       "timeout": 900,
       "enabled": false
     }

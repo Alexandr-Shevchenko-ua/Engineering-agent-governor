@@ -87,6 +87,7 @@ CI: `.github/workflows/ci.yml` (Python 3.11 / 3.12, pytest, smokes).
 - [docs/RELEASE_NOTES_v1.0.0.md](docs/RELEASE_NOTES_v1.0.0.md)
 - [docs/RELEASE_NOTES_v1.0.0-rc1.md](docs/RELEASE_NOTES_v1.0.0-rc1.md) (release candidate)
 - [docs/SELF_DOGFOODING.md](docs/SELF_DOGFOODING.md)
+- [docs/RUNNER_PROFILE_LOCAL_SETUP.md](docs/RUNNER_PROFILE_LOCAL_SETUP.md)
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
 - [docs/DOGFOODING.md](docs/DOGFOODING.md)
 
