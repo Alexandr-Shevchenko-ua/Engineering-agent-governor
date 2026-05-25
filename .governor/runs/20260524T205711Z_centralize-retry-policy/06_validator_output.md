@@ -1,3 +1,0 @@
-## Verdict
-
-PASS
