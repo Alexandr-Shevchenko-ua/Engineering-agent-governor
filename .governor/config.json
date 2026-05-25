@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "profiles": {
+    "echo-test": {
+      "runner": "echo",
+      "description": "Safe builtin echo runner",
+      "timeout": 300,
+      "enabled": true
+    },
+    "fake-validator": {
+      "runner": "command",
+      "description": "Local fake validator for smoke tests",
+      "argv": [
+        "python",
+        "scripts/fake_agent.py"
+      ],
+      "timeout": 300,
+      "enabled": true
+    },
+    "cursor-local": {
+      "runner": "command",
+      "description": "Legacy placeholder — prefer cursor-headless-local.",
+      "argv": [],
+      "timeout": 900,
+      "enabled": false
+    },
+    "cursor-headless-local": {
+      "runner": "command",
+      "description": "Cursor Agent headless (agent -p). Prompt on stdin; see scripts/stream-progress_cursor_cli_example.sh",
+      "argv": [
+        "agent",
+        "-p",
+        "--force",
+        "--output-format",
+        "text"
+      ],
+      "timeout": 1800,
+      "enabled": true
+    },
+    "cursor-headless-ask-local": {
+      "runner": "command",
+      "description": "Cursor Agent read-only validation (agent -p --mode ask). Safe preview/dogfood without writes.",
+      "argv": [
+        "agent",
+        "-p",
+        "--force",
+        "--mode",
+        "ask",
+        "--output-format",
+        "text"
+      ],
+      "timeout": 900,
+      "enabled": true
+    },
+    "chatbang-local": {
+      "runner": "command",
+      "description": "Not for executor — use governor advisor ask for chatbang.",
+      "argv": [],
+      "timeout": 900,
+      "enabled": false
+    },
+    "claude-local": {
+      "runner": "command",
+      "description": "Claude Code -p (prompt on stdin). Enable only when auth works.",
+      "argv": [
+        "claude",
+        "-p",
+        "--output-format",
+        "text"
+      ],
+      "timeout": 900,
+      "enabled": false
+    }
+  }
+}

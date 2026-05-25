@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "engineering-agent-governor"
-version = "1.0.0"
+version = "1.1.0"
 description = "Local delegation-first engineering governor harness"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,10 +20,13 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "pexpect>=4.8; platform_system != 'Windows'",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+advisor = ["pexpect>=4.8; platform_system != 'Windows'"]
+dev = ["pytest>=8.0", "pexpect>=4.8; platform_system != 'Windows'"]
 
 [project.scripts]
 gov = "governor.cli:main"

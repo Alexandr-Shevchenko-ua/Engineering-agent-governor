@@ -16,14 +16,21 @@
     },
     "cursor-local": {
       "runner": "command",
-      "description": "User-configured local CLI. Fill argv with your trusted command; Governor does not ship Cursor CLI syntax.",
+      "description": "Legacy placeholder — prefer cursor-headless-local.",
       "argv": [],
       "timeout": 900,
       "enabled": false
     },
+    "cursor-headless-local": {
+      "runner": "command",
+      "description": "Cursor Headless CLI executor. Fill argv after local verification.",
+      "argv": [],
+      "timeout": 1800,
+      "enabled": false
+    },
     "chatbang-local": {
       "runner": "command",
-      "description": "Chatbang — verify stdin/prompt contract locally before enabling.",
+      "description": "Not for executor — use: governor advisor ask --provider chatbang",
       "argv": [],
       "timeout": 900,
       "enabled": false

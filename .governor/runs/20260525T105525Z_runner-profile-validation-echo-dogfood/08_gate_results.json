@@ -1,0 +1,64 @@
+{
+  "overall": "WARN",
+  "changed_files_count": 2,
+  "lines_added": 10,
+  "lines_deleted": 2,
+  "suspicious_files": [],
+  "security_warnings": [],
+  "results": [
+    {
+      "name": "gate_profile",
+      "status": "PASS",
+      "command": null,
+      "summary": "Profile fast: Fast local validation",
+      "details": ""
+    },
+    {
+      "name": "git_status_short",
+      "status": "PASS",
+      "command": "git status --short",
+      "summary": "M README.md",
+      "details": "M README.md\n M examples/governor.config.example.json\n?? .claude/\n?? docs/RUNNER_PROFILE_LOCAL_SETUP.md"
+    },
+    {
+      "name": "git_diff_check",
+      "status": "PASS",
+      "command": "git diff --check",
+      "summary": "exit 0",
+      "details": ""
+    },
+    {
+      "name": "pytest",
+      "status": "PASS",
+      "command": "pytest -q",
+      "summary": "........................................................................ [ 35%]",
+      "details": "........................................................................ [ 35%]\n........................................................................ [ 70%]\n.............................................................            [100%]\n205 passed in 18.83s"
+    },
+    {
+      "name": "diff_budget",
+      "status": "PASS",
+      "command": null,
+      "summary": "2 files, +10/-2 within budget",
+      "details": ""
+    },
+    {
+      "name": "sensitive_paths",
+      "status": "PASS",
+      "command": null,
+      "summary": "No project sensitive_paths matched",
+      "details": ""
+    }
+  ],
+  "gate_profile": "fast",
+  "required_checks": [
+    "git_diff_check",
+    "pytest",
+    "sensitive_paths"
+  ],
+  "optional_checks": [
+    "ruff",
+    "mypy",
+    "git_status_short"
+  ],
+  "profile_compliance": "WARN"
+}

@@ -72,6 +72,7 @@ from governor.governed_run import (
     governed_run_start,
     print_run_summary,
 )
+from governor.advisor import ADVISOR_KINDS, ask_advisor
 from governor.check import check_exit_code, run_check
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
@@ -209,7 +210,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include recent trace events in JSON package",
     )
-
     p_report = sub.add_parser("report", help="Generate final report and lead update", parents=[parent])
     p_report.add_argument("--run-id", required=True)
 
@@ -497,6 +497,69 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include full prompt bodies in JSON bundle",
     )
+
+    def _add_advisor_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--run-id", required=True)
+        p.add_argument(
+            "--provider",
+            dest="advisor_provider",
+            choices=["chatbang"],
+            default="chatbang",
+            help="Advisor provider (default: chatbang)",
+        )
+        p.add_argument(
+            "--kind",
+            choices=sorted(ADVISOR_KINDS),
+            default="next-action",
+            help="Advisor use case",
+        )
+        p.add_argument("--question", default=None, help="Override default question for kind")
+        p.add_argument(
+            "--chatbang-command",
+            dest="chatbang_command",
+            default="chatbang",
+            help="Chatbang executable (local override)",
+        )
+        p.add_argument("--timeout", type=int, default=180, help="Seconds (30–900)")
+        p.add_argument("--max-output-chars", type=int, default=20000)
+        p.add_argument("--dry-run", action="store_true", help="Write request only; do not call chatbang")
+        p.add_argument(
+            "--include-prompts",
+            action="store_true",
+            help="Include full executor/validator prompts in advisor context",
+        )
+        p.add_argument(
+            "--force",
+            action="store_true",
+            help="Allow advisor ask when final report already exists",
+        )
+
+    p_advisor = sub.add_parser(
+        "advisor",
+        help="Semantic Governor Advisor (chatbang via pexpect; not executor)",
+        parents=[parent],
+    )
+    advisor_sub = p_advisor.add_subparsers(dest="advisor_cmd", required=True)
+    p_advisor_ask = advisor_sub.add_parser(
+        "ask",
+        help="Ask chatbang advisor for bounded run guidance",
+        parents=[parent],
+    )
+    _add_advisor_args(p_advisor_ask)
+
+    p_rev_advise = review_sub.add_parser(
+        "advise",
+        help="Chatbang advisor: evidence-review (does not export or change state)",
+        parents=[parent],
+    )
+    _add_advisor_args(p_rev_advise)
+
+    p_plan_advise = plan_sub.add_parser(
+        "advise",
+        help="Chatbang advisor: plan-review (does not execute plan)",
+        parents=[parent],
+    )
+    _add_advisor_args(p_plan_advise)
 
     p_run = sub.add_parser(
         "run",
@@ -1415,6 +1478,55 @@ def cmd_run_resume(args: argparse.Namespace) -> int:
     return result.exit_code
 
 
+def _run_advisor_ask(args: argparse.Namespace, *, kind_override: str | None = None) -> int:
+    kind = kind_override or args.kind
+    try:
+        store = open_store(_repo_path_from_args(args))
+        result = ask_advisor(
+            store,
+            args.run_id,
+            provider=args.advisor_provider,
+            kind=kind,
+            question=args.question,
+            command=args.chatbang_command,
+            timeout=args.timeout,
+            max_output_chars=args.max_output_chars,
+            dry_run=args.dry_run,
+            include_prompts=args.include_prompts,
+            force=args.force,
+        )
+    except (FileNotFoundError, ValueError, ImportError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Advisor request: {result.request_path}")
+    if result.dry_run:
+        print("Dry run — chatbang not invoked.")
+        return 0
+    if result.response_path:
+        print(f"Advisor response: {result.response_path}")
+    if result.ok:
+        print("Advisor: OK")
+        return 0
+    print(f"Advisor: FAIL — {result.error or 'unknown'}", file=sys.stderr)
+    return 1
+
+
+def cmd_advisor_ask(args: argparse.Namespace) -> int:
+    return _run_advisor_ask(args)
+
+
+def cmd_plan_advise(args: argparse.Namespace) -> int:
+    return _run_advisor_ask(args, kind_override="plan-review")
+
+
+def cmd_review_advise(args: argparse.Namespace) -> int:
+    return _run_advisor_ask(args, kind_override="evidence-review")
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     payload = {
         "version": __version__,
@@ -1488,6 +1600,7 @@ def main(argv: list[str] | None = None) -> int:
             "resume": cmd_plan_resume,
             "validate": cmd_plan_validate,
             "checkpoint": cmd_plan_checkpoint,
+            "advise": cmd_plan_advise,
         }
         return plan_handlers[args.plan_cmd](args)
     if args.command == "evidence":
@@ -1518,6 +1631,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "review":
         if args.review_cmd == "export":
             return cmd_review_export(args)
+        if args.review_cmd == "advise":
+            return cmd_review_advise(args)
+    if args.command == "advisor":
+        if args.advisor_cmd == "ask":
+            return cmd_advisor_ask(args)
     return handlers[args.command](args)
 
 

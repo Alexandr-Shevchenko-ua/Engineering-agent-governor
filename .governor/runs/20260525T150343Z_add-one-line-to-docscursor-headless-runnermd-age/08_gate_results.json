@@ -1,0 +1,64 @@
+{
+  "overall": "WARN",
+  "changed_files_count": 11,
+  "lines_added": 194,
+  "lines_deleted": 18,
+  "suspicious_files": [],
+  "security_warnings": [],
+  "results": [
+    {
+      "name": "gate_profile",
+      "status": "PASS",
+      "command": null,
+      "summary": "Profile fast: Fast local validation",
+      "details": ""
+    },
+    {
+      "name": "git_status_short",
+      "status": "PASS",
+      "command": "git status --short",
+      "summary": "M README.md",
+      "details": "M README.md\n M docs/CLI_REFERENCE.md\n M docs/RUNNER_PROFILE_LOCAL_SETUP.md\n M examples/governor.config.example.json\n M governor/__init__.py\n M governor/cli.py\n M governor/config.py\n M pyproject.toml\n M scripts/self_dogfood_release_check.py\n M tests/test_cli.py\n M tests/test_version_and_check.py\n?? .claude/\n?? docs/CHATBANG_GOVERNOR_ADVISOR.md\n?? docs/CURSOR_HEADLESS_RUNNER.md\n?? governor/advisor.py\n?? governor/chatbang_bridge.py\n?? scripts/chatbang_advisor_local_check.py\n?? scripts/chatbang_run_example.py\n?? scripts/cursor_runner_local_check.py\n?? scripts/fake_chatbang.py\n?? scripts/smoke_chatbang_advisor_workflow.py\n?? scripts/stream-progress_cursor_cli_example.sh\n?? tests/test_advisor.py\n?? tests/test_chatbang_bridge.py"
+    },
+    {
+      "name": "git_diff_check",
+      "status": "PASS",
+      "command": "git diff --check",
+      "summary": "exit 0",
+      "details": ""
+    },
+    {
+      "name": "pytest",
+      "status": "PASS",
+      "command": "pytest -q",
+      "summary": "........................................................................ [ 33%]",
+      "details": "........................................................................ [ 33%]\n........................................................................ [ 66%]\n........................................................................ [ 99%]\n..                                                                       [100%]\n218 passed in 7.07s"
+    },
+    {
+      "name": "diff_budget",
+      "status": "PASS",
+      "command": null,
+      "summary": "11 files, +194/-18 within budget",
+      "details": ""
+    },
+    {
+      "name": "sensitive_paths",
+      "status": "PASS",
+      "command": null,
+      "summary": "No project sensitive_paths matched",
+      "details": ""
+    }
+  ],
+  "gate_profile": "fast",
+  "required_checks": [
+    "git_diff_check",
+    "pytest",
+    "sensitive_paths"
+  ],
+  "optional_checks": [
+    "ruff",
+    "mypy",
+    "git_status_short"
+  ],
+  "profile_compliance": "WARN"
+}

@@ -1,5 +1,4 @@
-# Governor runtime (never commit)
-.governor/
+# Governor runtime (never commit) lets leave it as is for now
 
 # Virtual environments
 .venv/

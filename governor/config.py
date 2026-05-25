@@ -102,8 +102,26 @@ def default_config_dict(repo_path: Path) -> dict[str, Any]:
         "cursor-local": {
             "runner": "command",
             "description": (
-                "User-configured local CLI profile. Fill argv with your trusted command; "
-                "Governor does not ship Cursor CLI syntax."
+                "Legacy placeholder — prefer cursor-headless-local for executor runs."
+            ),
+            "argv": [],
+            "timeout": 900,
+            "enabled": False,
+        },
+        "cursor-headless-local": {
+            "runner": "command",
+            "description": (
+                "Cursor Headless CLI executor. Fill argv locally after verifying "
+                "Cursor CLI syntax; Governor does not ship personal paths."
+            ),
+            "argv": [],
+            "timeout": 1800,
+            "enabled": False,
+        },
+        "chatbang-local": {
+            "runner": "command",
+            "description": (
+                "Not recommended as executor — use governor advisor ask for chatbang."
             ),
             "argv": [],
             "timeout": 900,

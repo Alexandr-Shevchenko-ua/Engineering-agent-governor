@@ -1,0 +1,355 @@
+{
+  "version": 1,
+  "exported_at": "2026-05-25T10:55:50Z",
+  "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+  "task": "Runner profile validation echo dogfood",
+  "repo_path": "/home/shevchenkool/project/Engineering-agent-governor",
+  "state": "FINAL_REPORT_READY",
+  "outcome": "PASS",
+  "repair_count": 0,
+  "repair_prompt_count": 0,
+  "repair_history": {
+    "prompts": [],
+    "outputs": [],
+    "failed": []
+  },
+  "policy": "default",
+  "policy_description": "General engineering task with balanced scope, gates, and validator rigor.",
+  "policy_expectations": [
+    "Executor output recorded",
+    "Gate results present",
+    "Validator verdict recorded"
+  ],
+  "policy_compliance": {
+    "overall": "PASS",
+    "policy": "default",
+    "findings": [],
+    "missing_artifacts": [],
+    "expectations": [
+      "Executor output recorded",
+      "Gate results present",
+      "Validator verdict recorded"
+    ]
+  },
+  "plan": {
+    "overall_status": "PASS",
+    "step_counts": {
+      "PASS": 3,
+      "FAIL": 1
+    },
+    "executor_profile": "echo-test",
+    "validator_profile": "fake-validator",
+    "gate_profile": "fast"
+  },
+  "commands_executed": [
+    "python -m governor init --task 'Runner profile validation echo dogfood' --policy default --repo-path /home/shevchenkool/project/Engineering-agent-governor",
+    "python -m governor plan create --run-id 20260525T105525Z_runner-profile-validation-echo-dogfood --policy default --gate-profile fast",
+    "# Recommended after closure: python -m governor evidence export --run-id 20260525T105525Z_runner-profile-validation-echo-dogfood",
+    "python -m governor dispatch --run-id 20260525T105525Z_runner-profile-validation-echo-dogfood --role executor --profile echo-test --approve --repo-path .",
+    "python -m governor gate --run-id 20260525T105525Z_runner-profile-validation-echo-dogfood",
+    "python -m governor dispatch --run-id 20260525T105525Z_runner-profile-validation-echo-dogfood --role validator --profile fake-validator --command python scripts/fake_agent.py --approve --repo-path .",
+    "python -m governor report --run-id 20260525T105525Z_runner-profile-validation-echo-dogfood",
+    "python -m governor plan execute --run-id 20260525T105525Z_runner-profile-validation-echo-dogfood --approve"
+  ],
+  "gate": {
+    "overall": "WARN",
+    "changed_files_count": 2,
+    "lines_added": 10,
+    "lines_deleted": 2,
+    "suspicious_files": [],
+    "security_warnings": [],
+    "results": [
+      {
+        "name": "gate_profile",
+        "status": "PASS",
+        "command": null,
+        "summary": "Profile fast: Fast local validation",
+        "details": ""
+      },
+      {
+        "name": "git_status_short",
+        "status": "PASS",
+        "command": "git status --short",
+        "summary": "M README.md",
+        "details": "M README.md\n M examples/governor.config.example.json\n?? .claude/\n?? docs/RUNNER_PROFILE_LOCAL_SETUP.md"
+      },
+      {
+        "name": "git_diff_check",
+        "status": "PASS",
+        "command": "git diff --check",
+        "summary": "exit 0",
+        "details": ""
+      },
+      {
+        "name": "pytest",
+        "status": "PASS",
+        "command": "pytest -q",
+        "summary": "........................................................................ [ 35%]",
+        "details": "........................................................................ [ 35%]\n........................................................................ [ 70%]\n.............................................................            [100%]\n205 passed in 18.83s"
+      },
+      {
+        "name": "diff_budget",
+        "status": "PASS",
+        "command": null,
+        "summary": "2 files, +10/-2 within budget",
+        "details": ""
+      },
+      {
+        "name": "sensitive_paths",
+        "status": "PASS",
+        "command": null,
+        "summary": "No project sensitive_paths matched",
+        "details": ""
+      }
+    ],
+    "gate_profile": "fast",
+    "required_checks": [
+      "git_diff_check",
+      "pytest",
+      "sensitive_paths"
+    ],
+    "optional_checks": [
+      "ruff",
+      "mypy",
+      "git_status_short"
+    ],
+    "profile_compliance": "WARN"
+  },
+  "gate_profile": "fast",
+  "validator_verdict": "PASS",
+  "validator_summary": "# Dispatch output\n\n**Dispatch status:** OK\n**Runner:** command\n**Role:** validator\n**Exit code:** 0\n**Duration seconds:** 0.01\n**Prompt:** 04_validator_prompt.md\n\n## Stdout\n\n## Validator (fake_agent)\n\nVerdict: PASS\n\n## Stderr\n\n_empty_\n\n## Notes\n\n- Output was captured by Governor dispatch.\n- Redaction is heuristic; review before sharing.",
+  "human_checkpoints_file": null,
+  "artifacts": [
+    "00_task_intake.md",
+    "01_scope_and_assumptions.md",
+    "02_risk_register.md",
+    "03_executor_prompt.md",
+    "04_validator_prompt.md",
+    "05_executor_output.md",
+    "06_validator_output.md",
+    "08_gate_results.json",
+    "08_gate_results.md",
+    "09_final_report.md",
+    "10_lead_update.md",
+    "12_run_plan.json",
+    "12_run_plan.md",
+    "run_state.json",
+    "trace.jsonl"
+  ],
+  "trace_recent": [
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "63048620-a29a-4bbc-82a3-37defc37c3f7",
+      "ts": "2026-05-25T10:55:25Z",
+      "phase": "intake",
+      "actor": "governor",
+      "action": "init",
+      "input_ref": null,
+      "output_ref": "/home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "status": "ok",
+      "reason": "Created run for task: Runner profile validation echo dogfood (policy=default)"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "941b198e-1853-4667-86df-49e0d0800586",
+      "ts": "2026-05-25T10:55:25Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_create",
+      "input_ref": null,
+      "output_ref": "12_run_plan.json",
+      "status": "ok",
+      "reason": "steps=4 policy=default auto_repair=False checkpoints=0"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "9d69762e-b297-436e-a1b9-5cd8d7f128f2",
+      "ts": "2026-05-25T10:55:25Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_execute_start",
+      "input_ref": null,
+      "output_ref": "12_run_plan.json",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "9d5a3ff9-409c-41b8-bf8e-124c031b87cd",
+      "ts": "2026-05-25T10:55:25Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_start",
+      "input_ref": null,
+      "output_ref": "dispatch_executor",
+      "status": "ok",
+      "reason": "dispatch_executor"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "031c3e01-2dfa-4204-85b4-51f0ca6df9ea",
+      "ts": "2026-05-25T10:55:25Z",
+      "phase": "dispatch",
+      "actor": "governor",
+      "action": "dispatch_executor",
+      "input_ref": "03_executor_prompt.md",
+      "output_ref": "05_executor_output.md",
+      "status": "ok",
+      "reason": "profile=echo-test runner=echo exit=0 duration=0.00s"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "f77c4148-4a63-4415-b757-f5942c6d14cd",
+      "ts": "2026-05-25T10:55:25Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_finish",
+      "input_ref": null,
+      "output_ref": "dispatch_executor",
+      "status": "ok",
+      "reason": "dispatch_executor"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "badde594-bbbb-4911-9925-fc08a2185c4a",
+      "ts": "2026-05-25T10:55:25Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_start",
+      "input_ref": null,
+      "output_ref": "gate",
+      "status": "ok",
+      "reason": "gate"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "2031f71a-52be-4df5-a476-694245d158c4",
+      "ts": "2026-05-25T10:55:44Z",
+      "phase": "gate",
+      "actor": "governor",
+      "action": "gate",
+      "input_ref": null,
+      "output_ref": "08_gate_results.json",
+      "status": "warn",
+      "reason": "overall=WARN"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "7755b505-d1be-4cee-908a-45d8c27feebd",
+      "ts": "2026-05-25T10:55:44Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_finish",
+      "input_ref": null,
+      "output_ref": "gate",
+      "status": "fail",
+      "reason": "gate overall WARN (stop_on_warn)"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "8803d20f-8d4d-4a03-abe9-b4b1777e8fa9",
+      "ts": "2026-05-25T10:55:44Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_execute_stop",
+      "input_ref": null,
+      "output_ref": "12_run_plan.json",
+      "status": "fail",
+      "reason": "gate"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "590ac3af-281e-4b6d-bb30-5d1d57da68c3",
+      "ts": "2026-05-25T10:55:50Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_resume_start",
+      "input_ref": null,
+      "output_ref": "12_run_plan.json",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "72ac4b62-551d-4178-9d15-cd44541dd1fb",
+      "ts": "2026-05-25T10:55:50Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_start",
+      "input_ref": null,
+      "output_ref": "dispatch_validator",
+      "status": "ok",
+      "reason": "dispatch_validator"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "399ac111-3f47-4bc8-b275-8d412eab214f",
+      "ts": "2026-05-25T10:55:50Z",
+      "phase": "dispatch",
+      "actor": "governor",
+      "action": "dispatch_validator",
+      "input_ref": "04_validator_prompt.md",
+      "output_ref": "06_validator_output.md",
+      "status": "ok",
+      "reason": "profile=fake-validator runner=command exit=0 duration=0.01s"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "cc11f549-b583-4a0d-88af-d669847a88c1",
+      "ts": "2026-05-25T10:55:50Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_finish",
+      "input_ref": null,
+      "output_ref": "dispatch_validator",
+      "status": "ok",
+      "reason": "dispatch_validator"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "b8e870cd-64e7-44d2-907e-5b172de4f344",
+      "ts": "2026-05-25T10:55:50Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_start",
+      "input_ref": null,
+      "output_ref": "report",
+      "status": "ok",
+      "reason": "report"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "c6440330-0c76-4979-aafb-9f3c97b682b9",
+      "ts": "2026-05-25T10:55:50Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_finish",
+      "input_ref": null,
+      "output_ref": "report",
+      "status": "ok",
+      "reason": "report"
+    },
+    {
+      "run_id": "20260525T105525Z_runner-profile-validation-echo-dogfood",
+      "event_id": "cb2c5929-043f-4a37-b49f-c261214310a2",
+      "ts": "2026-05-25T10:55:50Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_resume_stop",
+      "input_ref": null,
+      "output_ref": "12_run_plan.json",
+      "status": "pass",
+      "reason": "complete"
+    }
+  ],
+  "safety_notes": [
+    "Governor does not merge, push, or deploy.",
+    "Prompt bodies excluded unless --include-prompts.",
+    "Repair dispatch is never automatic in plan workflows."
+  ],
+  "recommendation": "Run completed with PASS; review evidence bundle before merge.",
+  "prompt_artifacts": [
+    "03_executor_prompt.md",
+    "04_validator_prompt.md"
+  ]
+}

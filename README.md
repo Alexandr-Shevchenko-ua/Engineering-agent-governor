@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-**v1.0.0** — local control plane for agent-delegated engineering: auditable runs, gates, plans, evidence, and review packages. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
+**v1.1.0** — local control plane (Cursor Headless executor + Chatbang Governor Advisor) for agent-delegated engineering: auditable runs, gates, plans, evidence, and review packages. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
 
 ## Not autopilot
 
@@ -88,6 +88,8 @@ CI: `.github/workflows/ci.yml` (Python 3.11 / 3.12, pytest, smokes).
 - [docs/RELEASE_NOTES_v1.0.0-rc1.md](docs/RELEASE_NOTES_v1.0.0-rc1.md) (release candidate)
 - [docs/SELF_DOGFOODING.md](docs/SELF_DOGFOODING.md)
 - [docs/RUNNER_PROFILE_LOCAL_SETUP.md](docs/RUNNER_PROFILE_LOCAL_SETUP.md)
+- [docs/CURSOR_HEADLESS_RUNNER.md](docs/CURSOR_HEADLESS_RUNNER.md)
+- [docs/CHATBANG_GOVERNOR_ADVISOR.md](docs/CHATBANG_GOVERNOR_ADVISOR.md)
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
 - [docs/DOGFOODING.md](docs/DOGFOODING.md)
 

@@ -1,0 +1,330 @@
+{
+  "version": 1,
+  "exported_at": "2026-05-25T14:41:52Z",
+  "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+  "task": "v1.1 echo governed dogfood",
+  "repo_path": "/home/shevchenkool/project/Engineering-agent-governor",
+  "state": "FINAL_REPORT_READY",
+  "outcome": "PASS",
+  "repair_count": 0,
+  "repair_prompt_count": 0,
+  "repair_history": {
+    "prompts": [],
+    "outputs": [],
+    "failed": []
+  },
+  "policy": "default",
+  "policy_description": "General engineering task with balanced scope, gates, and validator rigor.",
+  "policy_expectations": [
+    "Executor output recorded",
+    "Gate results present",
+    "Validator verdict recorded"
+  ],
+  "policy_compliance": {
+    "overall": "PASS",
+    "policy": "default",
+    "findings": [],
+    "missing_artifacts": [],
+    "expectations": [
+      "Executor output recorded",
+      "Gate results present",
+      "Validator verdict recorded"
+    ]
+  },
+  "plan": {
+    "overall_status": "PASS",
+    "step_counts": {
+      "PASS": 4
+    },
+    "executor_profile": "echo-test",
+    "validator_profile": "fake-validator",
+    "gate_profile": "fast"
+  },
+  "commands_executed": [
+    "python -m governor init --task 'v1.1 echo governed dogfood' --policy default --repo-path /home/shevchenkool/project/Engineering-agent-governor",
+    "python -m governor plan create --run-id 20260525T144111Z_v11-echo-governed-dogfood --policy default --gate-profile fast",
+    "# Recommended after closure: python -m governor evidence export --run-id 20260525T144111Z_v11-echo-governed-dogfood",
+    "python -m governor dispatch --run-id 20260525T144111Z_v11-echo-governed-dogfood --role executor --profile echo-test --approve --repo-path .",
+    "python -m governor gate --run-id 20260525T144111Z_v11-echo-governed-dogfood",
+    "python -m governor dispatch --run-id 20260525T144111Z_v11-echo-governed-dogfood --role validator --profile fake-validator --command python scripts/fake_agent.py --approve --repo-path .",
+    "python -m governor report --run-id 20260525T144111Z_v11-echo-governed-dogfood",
+    "python -m governor plan execute --run-id 20260525T144111Z_v11-echo-governed-dogfood --approve"
+  ],
+  "gate": {
+    "overall": "WARN",
+    "changed_files_count": 11,
+    "lines_added": 194,
+    "lines_deleted": 18,
+    "suspicious_files": [],
+    "security_warnings": [],
+    "results": [
+      {
+        "name": "gate_profile",
+        "status": "PASS",
+        "command": null,
+        "summary": "Profile fast: Fast local validation",
+        "details": ""
+      },
+      {
+        "name": "git_status_short",
+        "status": "PASS",
+        "command": "git status --short",
+        "summary": "M README.md",
+        "details": "M README.md\n M docs/CLI_REFERENCE.md\n M docs/RUNNER_PROFILE_LOCAL_SETUP.md\n M examples/governor.config.example.json\n M governor/__init__.py\n M governor/cli.py\n M governor/config.py\n M pyproject.toml\n M scripts/self_dogfood_release_check.py\n M tests/test_cli.py\n M tests/test_version_and_check.py\n?? .claude/\n?? docs/CHATBANG_GOVERNOR_ADVISOR.md\n?? docs/CURSOR_HEADLESS_RUNNER.md\n?? governor/advisor.py\n?? governor/chatbang_bridge.py\n?? scripts/chatbang_advisor_local_check.py\n?? scripts/chatbang_run_example.py\n?? scripts/cursor_runner_local_check.py\n?? scripts/fake_chatbang.py\n?? scripts/smoke_chatbang_advisor_workflow.py\n?? tests/test_advisor.py\n?? tests/test_chatbang_bridge.py"
+      },
+      {
+        "name": "git_diff_check",
+        "status": "PASS",
+        "command": "git diff --check",
+        "summary": "exit 0",
+        "details": ""
+      },
+      {
+        "name": "pytest",
+        "status": "PASS",
+        "command": "pytest -q",
+        "summary": "........................................................................ [ 33%]",
+        "details": "........................................................................ [ 33%]\n........................................................................ [ 66%]\n........................................................................ [ 99%]\n..                                                                       [100%]\n218 passed in 41.10s"
+      },
+      {
+        "name": "diff_budget",
+        "status": "PASS",
+        "command": null,
+        "summary": "11 files, +194/-18 within budget",
+        "details": ""
+      },
+      {
+        "name": "sensitive_paths",
+        "status": "PASS",
+        "command": null,
+        "summary": "No project sensitive_paths matched",
+        "details": ""
+      }
+    ],
+    "gate_profile": "fast",
+    "required_checks": [
+      "git_diff_check",
+      "pytest",
+      "sensitive_paths"
+    ],
+    "optional_checks": [
+      "ruff",
+      "mypy",
+      "git_status_short"
+    ],
+    "profile_compliance": "WARN"
+  },
+  "gate_profile": "fast",
+  "validator_verdict": "PASS",
+  "validator_summary": "# Dispatch output\n\n**Dispatch status:** OK\n**Runner:** command\n**Role:** validator\n**Exit code:** 0\n**Duration seconds:** 0.06\n**Prompt:** 04_validator_prompt.md\n\n## Stdout\n\n## Validator (fake_agent)\n\nVerdict: PASS\n\n## Stderr\n\n_empty_\n\n## Notes\n\n- Output was captured by Governor dispatch.\n- Redaction is heuristic; review before sharing.",
+  "human_checkpoints_file": null,
+  "artifacts": [
+    "00_task_intake.md",
+    "01_scope_and_assumptions.md",
+    "02_risk_register.md",
+    "03_executor_prompt.md",
+    "04_validator_prompt.md",
+    "05_executor_output.md",
+    "06_validator_output.md",
+    "08_gate_results.json",
+    "08_gate_results.md",
+    "09_final_report.md",
+    "10_lead_update.md",
+    "12_run_plan.json",
+    "12_run_plan.md",
+    "run_state.json",
+    "trace.jsonl"
+  ],
+  "trace_recent": [
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "9617dcc7-4679-4a53-8208-fa21c0dcf963",
+      "ts": "2026-05-25T14:41:11Z",
+      "phase": "intake",
+      "actor": "governor",
+      "action": "init",
+      "input_ref": null,
+      "output_ref": "/home/shevchenkool/project/Engineering-agent-governor/.governor/runs/20260525T144111Z_v11-echo-governed-dogfood",
+      "status": "ok",
+      "reason": "Created run for task: v1.1 echo governed dogfood (policy=default)"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "74c29107-d276-462c-a88c-adf771f5893f",
+      "ts": "2026-05-25T14:41:11Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_create",
+      "input_ref": null,
+      "output_ref": "12_run_plan.json",
+      "status": "ok",
+      "reason": "steps=4 policy=default auto_repair=False checkpoints=0"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "b0f18092-4611-43e6-9c20-ddaacfa00a19",
+      "ts": "2026-05-25T14:41:11Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_execute_start",
+      "input_ref": null,
+      "output_ref": "12_run_plan.json",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "98727607-781b-4fa3-b548-c96808f6bebe",
+      "ts": "2026-05-25T14:41:11Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_start",
+      "input_ref": null,
+      "output_ref": "dispatch_executor",
+      "status": "ok",
+      "reason": "dispatch_executor"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "3a5a76a9-1b95-4bc5-978b-1e159c804150",
+      "ts": "2026-05-25T14:41:11Z",
+      "phase": "dispatch",
+      "actor": "governor",
+      "action": "dispatch_executor",
+      "input_ref": "03_executor_prompt.md",
+      "output_ref": "05_executor_output.md",
+      "status": "ok",
+      "reason": "profile=echo-test runner=echo exit=0 duration=0.00s"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "bf1ad284-5b48-4853-bb5f-a63d26b75bcc",
+      "ts": "2026-05-25T14:41:11Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_finish",
+      "input_ref": null,
+      "output_ref": "dispatch_executor",
+      "status": "ok",
+      "reason": "dispatch_executor"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "257c996c-fe24-4a1b-828a-7ba2211bf6c7",
+      "ts": "2026-05-25T14:41:11Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_start",
+      "input_ref": null,
+      "output_ref": "gate",
+      "status": "ok",
+      "reason": "gate"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "37f1dd1b-2c61-4a86-832f-fbce46e2e4a1",
+      "ts": "2026-05-25T14:41:52Z",
+      "phase": "gate",
+      "actor": "governor",
+      "action": "gate",
+      "input_ref": null,
+      "output_ref": "08_gate_results.json",
+      "status": "warn",
+      "reason": "overall=WARN"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "d58d9565-9593-4f92-9a7e-ed6b5ccab202",
+      "ts": "2026-05-25T14:41:52Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_finish",
+      "input_ref": null,
+      "output_ref": "gate",
+      "status": "ok",
+      "reason": "gate"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "7df76e41-bd5f-4608-8568-c9be74e02cc3",
+      "ts": "2026-05-25T14:41:52Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_start",
+      "input_ref": null,
+      "output_ref": "dispatch_validator",
+      "status": "ok",
+      "reason": "dispatch_validator"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "dc7044f8-f7af-40ea-9314-8d743759a167",
+      "ts": "2026-05-25T14:41:52Z",
+      "phase": "dispatch",
+      "actor": "governor",
+      "action": "dispatch_validator",
+      "input_ref": "04_validator_prompt.md",
+      "output_ref": "06_validator_output.md",
+      "status": "ok",
+      "reason": "profile=fake-validator runner=command exit=0 duration=0.06s"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "c6a326c9-c4f8-4f0a-a934-bd0e9fdade21",
+      "ts": "2026-05-25T14:41:52Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_finish",
+      "input_ref": null,
+      "output_ref": "dispatch_validator",
+      "status": "ok",
+      "reason": "dispatch_validator"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "8be7cc24-83f1-4be0-b959-26564db83ba0",
+      "ts": "2026-05-25T14:41:52Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_start",
+      "input_ref": null,
+      "output_ref": "report",
+      "status": "ok",
+      "reason": "report"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "b8fe4a11-5aa9-4499-a2f7-72e9ac7dfb38",
+      "ts": "2026-05-25T14:41:52Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_step_finish",
+      "input_ref": null,
+      "output_ref": "report",
+      "status": "ok",
+      "reason": "report"
+    },
+    {
+      "run_id": "20260525T144111Z_v11-echo-governed-dogfood",
+      "event_id": "8e43ff98-cf67-426b-abb8-a297fe63ee12",
+      "ts": "2026-05-25T14:41:52Z",
+      "phase": "plan",
+      "actor": "governor",
+      "action": "plan_execute_stop",
+      "input_ref": null,
+      "output_ref": "12_run_plan.json",
+      "status": "pass",
+      "reason": "complete"
+    }
+  ],
+  "safety_notes": [
+    "Governor does not merge, push, or deploy.",
+    "Prompt bodies excluded unless --include-prompts.",
+    "Repair dispatch is never automatic in plan workflows."
+  ],
+  "recommendation": "Run completed with PASS; review evidence bundle before merge.",
+  "prompt_artifacts": [
+    "03_executor_prompt.md",
+    "04_validator_prompt.md"
+  ]
+}

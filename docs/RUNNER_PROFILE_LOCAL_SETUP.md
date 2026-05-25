@@ -1,4 +1,4 @@
-# Local runner profile setup (v1.0.0)
+# Local runner profile setup (v1.1.0)
 
 Governor passes the full role prompt (**`03_executor_prompt.md`**, etc.) on **stdin** to `runner: command` profiles. It does **not** ship Cursor, Claude, or Chatbang syntax in the codebase — you configure **`.governor/config.json`** locally (gitignored).
 
@@ -35,7 +35,8 @@ chatbang --help || true
 |-----|------|-------------------|
 | `cursor` (remote-cli) | Editor (open files, extensions) | `-` reads **files into editor**, not agent prompts — **not suitable** as agent runner |
 | `claude` (Claude Code) | Agent | **`claude -p`** reads prompt from **stdin** when non-interactive |
-| `chatbang` | Browser-backed ChatGPT | No documented stdin agent contract — **keep disabled** until you verify |
+| `chatbang` | **Governor Advisor** (pexpect `> `) | **Not an executor** — use `governor advisor ask` ([CHATBANG_GOVERNOR_ADVISOR.md](CHATBANG_GOVERNOR_ADVISOR.md)) |
+| Cursor Headless | **Executor** | Configure `cursor-headless-local` — see [CURSOR_HEADLESS_RUNNER.md](CURSOR_HEADLESS_RUNNER.md) |
 
 Test stdin yourself (no Governor):
 
@@ -136,8 +137,18 @@ The `cursor` binary on many Linux/WSL setups is the **VS Code-compatible editor 
 
 If you use a separate Cursor Agent CLI or wrapper, add it yourself under a new profile name with argv you trust, after verifying stdin (or switch to manual paste + `governor record`).
 
+## v1.1 architecture
+
+```text
+Governor CLI → gates, plans, evidence, review packages
+Executor     → cursor-headless-local (you configure argv)
+Advisor      → chatbang via `governor advisor ask` (not dispatch profile)
+```
+
 ## Related docs
 
-- [CLI_REFERENCE.md](CLI_REFERENCE.md) — `config`, `dispatch`
+- [CURSOR_HEADLESS_RUNNER.md](CURSOR_HEADLESS_RUNNER.md) — executor
+- [CHATBANG_GOVERNOR_ADVISOR.md](CHATBANG_GOVERNOR_ADVISOR.md) — semantic advisor
+- [CLI_REFERENCE.md](CLI_REFERENCE.md) — `config`, `dispatch`, `advisor`
 - [SELF_DOGFOODING.md](SELF_DOGFOODING.md) — release checks on this repo
 - `examples/governor.config.example.json` — starter profiles

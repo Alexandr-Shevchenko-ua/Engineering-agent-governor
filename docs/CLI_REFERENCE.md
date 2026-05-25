@@ -336,6 +336,23 @@ See [EVIDENCE_BUNDLES.md](EVIDENCE_BUNDLES.md).
 
 ---
 
+## advisor
+
+Semantic Governor Advisor (chatbang via pexpect). **Does not** change run state or execute code.
+
+```bash
+python -m governor advisor ask --run-id <id> --provider chatbang --kind next-action --repo-path .
+python -m governor advisor ask --run-id <id> --kind risk-review --dry-run --repo-path .
+python -m governor plan advise --run-id <id> --repo-path .
+python -m governor review advise --run-id <id> --repo-path .
+```
+
+**Artifacts:** `16_advisor_request_N.md`, `16_advisor_response_N.md`
+
+See [CHATBANG_GOVERNOR_ADVISOR.md](CHATBANG_GOVERNOR_ADVISOR.md).
+
+---
+
 ## review
 
 Review / PR handoff package.
