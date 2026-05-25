@@ -302,7 +302,10 @@ _register(
             "Cursor/Claude CLI syntax hardcoded in core",
         ],
         plan_defaults=PlanDefaults(
-            checkpoints=[("gate", "Confirm no autopilot/background/secret leakage")],
+            checkpoints=[
+                ("gate", "Confirm no autopilot/background/secret leakage"),
+                ("report", "Confirm harness changes before final report"),
+            ],
         ),
     )
 )

@@ -49,6 +49,15 @@ Inspect artifacts under `.governor/runs/<run-id>/` before merging. That director
 
 Optional: `doctor` before starting; `list` / `status` anytime.
 
+## Governed run (v0.8)
+
+```bash
+python -m governor run start --task "My task" --policy bugfix \
+  --use-default-profiles --approve --with-evidence --repo-path .
+```
+
+See [GOVERNED_RUNS.md](GOVERNED_RUNS.md).
+
 ## Policy packs (v0.7)
 
 ```bash

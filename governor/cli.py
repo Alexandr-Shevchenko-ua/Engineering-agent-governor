@@ -48,6 +48,13 @@ from governor.run_plan import (
     resume_plan,
     validate_plan,
 )
+from governor.governed_run import (
+    GovernedRunOptions,
+    build_run_summary_payload,
+    governed_run_resume,
+    governed_run_start,
+    print_run_summary,
+)
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
 from governor.utils import resolve_repo_path
@@ -390,6 +397,80 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include full prompt bodies in JSON bundle",
     )
+
+    p_run = sub.add_parser(
+        "run",
+        help="Governed run — create run, plan, optional execute (not autopilot)",
+        parents=[parent],
+    )
+    run_sub = p_run.add_subparsers(dest="run_cmd", required=True)
+
+    def _add_governed_common(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--continue-on-gate-warn",
+            action="store_true",
+        )
+        p.add_argument("--replace", action="store_true")
+        p.add_argument("--accept-failed-output", action="store_true")
+        p.add_argument("--max-steps", type=int, default=10)
+        p.add_argument("--with-evidence", action="store_true")
+        p.add_argument("--strict-preflight", action="store_true")
+        p.add_argument("--json", action="store_true", dest="as_json")
+
+    p_run_start = run_sub.add_parser(
+        "start",
+        help="Create run + plan; execute only with --approve",
+        parents=[parent],
+    )
+    p_run_start.add_argument("--task", required=True)
+    p_run_start.add_argument("--policy", default="default", metavar="NAME")
+    p_run_start.add_argument("--executor-profile", default=None)
+    p_run_start.add_argument("--validator-profile", default=None)
+    p_run_start.add_argument(
+        "--executor-runner",
+        choices=["echo", "command", "cursor"],
+        default=None,
+    )
+    p_run_start.add_argument(
+        "--validator-runner",
+        choices=["echo", "command", "cursor"],
+        default=None,
+    )
+    p_run_start.add_argument(
+        "--executor-command",
+        dest="executor_command",
+        nargs="*",
+        default=None,
+        metavar="ARG",
+    )
+    p_run_start.add_argument(
+        "--validator-command",
+        dest="validator_command",
+        nargs="*",
+        default=None,
+        metavar="ARG",
+    )
+    p_run_start.add_argument("--auto-repair-prepare-on-fail", action="store_true")
+    p_run_start.add_argument("--approve", action="store_true")
+    p_run_start.add_argument("--dry-run", action="store_true")
+    p_run_start.add_argument("--use-default-profiles", action="store_true")
+    p_run_start.add_argument("--checkpoint", action="append", default=[])
+    p_run_start.add_argument("--checkpoint-after", action="append", default=[])
+    _add_governed_common(p_run_start)
+
+    p_run_status = run_sub.add_parser("status", help="Run status summary", parents=[parent])
+    p_run_status.add_argument("--run-id", default=None)
+    p_run_status.add_argument("--json", action="store_true", dest="as_json")
+
+    p_run_resume = run_sub.add_parser(
+        "resume",
+        help="Resume governed plan; --approve required",
+        parents=[parent],
+    )
+    p_run_resume.add_argument("--run-id", required=True)
+    p_run_resume.add_argument("--approve", action="store_true")
+    p_run_resume.add_argument("--dry-run", action="store_true")
+    _add_governed_common(p_run_resume)
 
     return parser
 
@@ -1019,6 +1100,115 @@ def cmd_evidence_export(args: argparse.Namespace) -> int:
         return 1
 
 
+def _governed_opts_from_args(args: argparse.Namespace) -> GovernedRunOptions:
+    checkpoints = _parse_checkpoints(
+        getattr(args, "checkpoint", []) or [],
+        getattr(args, "checkpoint_after", []) or [],
+    )
+    auto_repair = True if getattr(args, "auto_repair_prepare_on_fail", False) else None
+    return GovernedRunOptions(
+        task=getattr(args, "task", ""),
+        repo_path=_repo_path_from_args(args),
+        policy=getattr(args, "policy", "default") or "default",
+        executor_profile=getattr(args, "executor_profile", None),
+        validator_profile=getattr(args, "validator_profile", None),
+        executor_runner=getattr(args, "executor_runner", None),
+        validator_runner=getattr(args, "validator_runner", None),
+        executor_command=getattr(args, "executor_command", None),
+        validator_command=getattr(args, "validator_command", None),
+        auto_repair_prepare_on_fail=auto_repair,
+        checkpoints=checkpoints or None,
+        with_evidence=getattr(args, "with_evidence", False),
+        approve=getattr(args, "approve", False),
+        dry_run=getattr(args, "dry_run", False),
+        continue_on_gate_warn=getattr(args, "continue_on_gate_warn", False),
+        max_steps=getattr(args, "max_steps", 10),
+        replace=getattr(args, "replace", False),
+        accept_failed_output=getattr(args, "accept_failed_output", False),
+        use_default_profiles=getattr(args, "use_default_profiles", False),
+        strict_preflight=getattr(args, "strict_preflight", False),
+    )
+
+
+def cmd_run_start(args: argparse.Namespace) -> int:
+    opts = _governed_opts_from_args(args)
+    result = governed_run_start(opts)
+    if result.error and not result.dry_run_actions:
+        print(f"Error: {result.error}", file=sys.stderr)
+    if result.dry_run_actions:
+        print("Dry run — would perform:")
+        for line in result.dry_run_actions:
+            print(f"  - {line}")
+        return 0
+    if result.run_id:
+        store = open_store(opts.repo_path)
+        payload = build_run_summary_payload(
+            store,
+            result.run_id,
+            repo_path=opts.repo_path,
+            stopped_at=result.stopped_at,
+            plan_overall_status=result.plan_overall_status,
+            evidence_exported=result.evidence_exported,
+            evidence_skipped_reason=result.evidence_skipped_reason,
+        )
+        if args.as_json:
+            payload["preflight_warnings"] = result.preflight_messages
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print_run_summary(payload, preflight_warnings=result.preflight_messages)
+        return result.exit_code
+    return result.exit_code or 1
+
+
+def cmd_run_status(args: argparse.Namespace) -> int:
+    try:
+        store = open_store(_repo_path_from_args(args))
+        run_dir, meta = store.get_run(args.run_id)
+        payload = build_run_summary_payload(store, meta.run_id, repo_path=_repo_path_from_args(args))
+        if args.as_json:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print_run_summary(payload)
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_run_resume(args: argparse.Namespace) -> int:
+    opts = _governed_opts_from_args(args)
+    if not args.run_id:
+        print("Error: --run-id required", file=sys.stderr)
+        return 1
+    try:
+        store = open_store(opts.repo_path)
+        result = governed_run_resume(store, args.run_id, opts=opts)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if result.error:
+        print(f"Error: {result.error}", file=sys.stderr)
+    if result.dry_run_actions:
+        for line in result.dry_run_actions:
+            print(f"  - {line}")
+        return 0
+    payload = build_run_summary_payload(
+        store,
+        args.run_id,
+        repo_path=opts.repo_path,
+        stopped_at=result.stopped_at,
+        plan_overall_status=result.plan_overall_status,
+        evidence_exported=result.evidence_exported,
+        evidence_skipped_reason=result.evidence_skipped_reason,
+    )
+    if args.as_json:
+        payload["preflight_warnings"] = result.preflight_messages
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        print_run_summary(payload, preflight_warnings=result.preflight_messages)
+    return result.exit_code
+
+
 def cmd_config_path(args: argparse.Namespace) -> int:
     repo = resolve_repo_path(_repo_path_from_args(args))
     print(config_path(repo))
@@ -1075,6 +1265,13 @@ def main(argv: list[str] | None = None) -> int:
             "validate": cmd_policy_validate,
         }
         return policy_handlers[args.policy_cmd](args)
+    if args.command == "run":
+        run_handlers = {
+            "start": cmd_run_start,
+            "status": cmd_run_status,
+            "resume": cmd_run_resume,
+        }
+        return run_handlers[args.run_cmd](args)
     return handlers[args.command](args)
 
 

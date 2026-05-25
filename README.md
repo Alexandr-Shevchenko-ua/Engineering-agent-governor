@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.7.0** adds **policy packs** (bugfix, refactor, docs, release, …) for tailored intake, plan defaults, and evidence compliance — on top of plan resume, checkpoints, and evidence export.
+Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.8.0** adds **`governor run start`** — one governed command for init + plan + optional bounded execution — plus policy packs, resume, checkpoints, and evidence export.
 
 ## What this is
 
@@ -54,6 +54,7 @@ gov init --task "My task" --repo-path .
 
 | Command | Purpose |
 |---------|---------|
+| `run` | Governed workflow (`start`, `status`, `resume`) — see [docs/GOVERNED_RUNS.md](docs/GOVERNED_RUNS.md) |
 | `init` | Create timestamped run (`--policy` for task template: bugfix, docs, …) |
 | `policy` | List/show/validate built-in policy packs (no `.governor` required) |
 | `status` | Show latest or specific run (does not create `.governor`) |
@@ -80,7 +81,9 @@ gov init --task "My task" --repo-path .
 
 **Policy packs:** [docs/POLICY_PACKS.md](docs/POLICY_PACKS.md)
 
-**Smoke tests:** `smoke_governor_workflow.py` · `smoke_dispatch_workflow.py` · `smoke_profile_workflow.py` · `smoke_repair_workflow.py` · `smoke_plan_workflow.py` · `smoke_resume_checkpoint_evidence_workflow.py` · `smoke_policy_workflow.py`
+**Governed runs:** [docs/GOVERNED_RUNS.md](docs/GOVERNED_RUNS.md)
+
+**Smoke tests:** `smoke_governor_workflow.py` · `smoke_dispatch_workflow.py` · `smoke_profile_workflow.py` · `smoke_repair_workflow.py` · `smoke_plan_workflow.py` · `smoke_resume_checkpoint_evidence_workflow.py` · `smoke_policy_workflow.py` · `smoke_governed_run_workflow.py`
 
 ## Dispatch is not autopilot
 
