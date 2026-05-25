@@ -118,6 +118,16 @@ def default_config_dict(repo_path: Path) -> dict[str, Any]:
             "timeout": 1800,
             "enabled": False,
         },
+        "cursor-governor-auto": {
+            "runner": "command",
+            "description": (
+                "Cursor Headless in ask/read-only mode for Governor proposals. "
+                "Model Auto. Fill argv locally (see docs/CURSOR_GOVERNOR_PROVIDER.md)."
+            ),
+            "argv": [],
+            "timeout": 900,
+            "enabled": False,
+        },
         "chatbang-local": {
             "runner": "command",
             "description": (

@@ -9,7 +9,20 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from governor.chatbang_bridge import run_chatbang_once, run_chatbang_with_session_prime
+from governor.governor_providers import (
+    DEFAULT_CURSOR_GOVERNOR_PROFILE,
+    GOVERNOR_SESSION_PRIME,
+    PROVIDER_CHATBANG,
+    PROVIDER_CURSOR_AUTO,
+    SAFETY_FLAG_CURSOR_GOVERNOR,
+    SAFETY_FLAG_DISABLED_PROFILE_ALLOWED,
+    SAFETY_FLAG_PROVIDER_FAILED,
+    SAFETY_FLAG_READ_ONLY_PROVIDER,
+    SAFETY_FLAG_WRITE_CAPABLE_BLOCKED,
+    _APPLY_BLOCKING_FLAGS,
+    get_governor_provider,
+    validate_provider_name,
+)
 from governor.config import config_path, load_profiles, redact_argv_for_display
 from governor.policy import POLICY_NAMES, get_policy, list_policies
 from governor.project_config import (
@@ -36,11 +49,6 @@ RAW_RESPONSE_MD = "raw_chatbang_response.md"
 GOVERNOR_REQUEST_MD = "governor_request.md"
 PROPOSAL_TRACE = "trace.jsonl"
 
-# Session prime — one line to chatbang before the full propose prompt (clears advisor habit).
-GOVERNOR_SESSION_PRIME = (
-    "GOVERNOR_MODE: New proposal task. Ignore prior advisor/VERDICT chat. "
-    "Acknowledge with exactly: GOVERNOR_MODE_OK"
-)
 
 PROPOSAL_STATUSES = frozenset({"PROPOSED", "APPLIED", "REJECTED", "EXPIRED"})
 CONFIDENCE_LEVELS = frozenset({"LOW", "MEDIUM", "HIGH"})
@@ -126,6 +134,25 @@ _DESTRUCTIVE_PATTERNS = [
     )
 ]
 
+_NEGATED_DESTRUCTIVE = re.compile(
+    r"(?:do\s+not|don'?t|never|must\s+not|shall\s+not|without|no)\s+"
+    r"(?:run\s+|execute\s+)?(?:git\s+)?",
+    re.IGNORECASE,
+)
+
+
+def _destructive_pattern_violation(blob: str) -> re.Pattern[str] | None:
+    """Return first destructive regex that matches non-negated text (e.g. skip 'do not git push')."""
+    for pat in _DESTRUCTIVE_PATTERNS:
+        for match in pat.finditer(blob):
+            prefix = blob[max(0, match.start() - 72) : match.start()]
+            prefix_plain = re.sub(r"\*+", "", prefix)
+            if _NEGATED_DESTRUCTIVE.search(prefix_plain):
+                continue
+            return pat
+    return None
+
+
 _SHELL_FORBIDDEN = [
     re.compile(p, re.IGNORECASE)
     for p in (
@@ -202,6 +229,9 @@ class GovernorProposal:
     safety_flags: list[str] = field(default_factory=list)
     applied_run_id: str | None = None
     rejection_reason: str | None = None
+    provider_profile: str | None = None
+    provider_model: str | None = None
+    provider_mode: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -229,6 +259,12 @@ class GovernorProposal:
             d["applied_run_id"] = self.applied_run_id
         if self.rejection_reason:
             d["rejection_reason"] = self.rejection_reason
+        if self.provider_profile:
+            d["provider_profile"] = self.provider_profile
+        if self.provider_model:
+            d["provider_model"] = self.provider_model
+        if self.provider_mode:
+            d["provider_mode"] = self.provider_mode
         return d
 
     @classmethod
@@ -260,6 +296,9 @@ class GovernorProposal:
             safety_flags=list(data.get("safety_flags") or []),
             applied_run_id=data.get("applied_run_id"),
             rejection_reason=data.get("rejection_reason"),
+            provider_profile=data.get("provider_profile"),
+            provider_model=data.get("provider_model"),
+            provider_mode=data.get("provider_mode"),
         )
 
 
@@ -433,6 +472,23 @@ def build_chatbang_propose_message(
     return redact("\n".join(lines))
 
 
+def build_cursor_propose_message(
+    task: str,
+    context: dict[str, Any],
+    *,
+    policy_hint: str | None = None,
+    extra_question: str | None = None,
+) -> str:
+    """Compact wire message for cursor-auto (read-only Governor provider)."""
+    msg = build_chatbang_propose_message(
+        task,
+        context,
+        policy_hint=policy_hint,
+        extra_question=extra_question,
+    )
+    return msg.replace("GOVERNOR_MODE_V12", "CURSOR_GOVERNOR_PROVIDER_V13", 1)
+
+
 def _clean_chatbang_output(text: str) -> str:
     text = re.sub(r"\[Thinking\.\.\.\]\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^\s*\[REDACTED[^\]]*\]\s*", "", text, flags=re.MULTILINE)
@@ -602,6 +658,9 @@ def proposal_from_parsed(
     provider: str,
     safety_flags: list[str],
     confidence: str,
+    provider_profile: str | None = None,
+    provider_model: str | None = None,
+    provider_mode: str | None = None,
 ) -> GovernorProposal:
     steps_raw = parsed.get("recommended_plan") or []
     steps: list[GovernorProposalStep] = []
@@ -650,6 +709,9 @@ def proposal_from_parsed(
         required_human_decisions=_coerce_str_list(parsed.get("required_human_decisions")),
         confidence=conf,
         safety_flags=list(safety_flags),
+        provider_profile=provider_profile,
+        provider_model=provider_model,
+        provider_mode=provider_mode,
     )
 
 
@@ -662,6 +724,9 @@ def _minimal_proposal(
     policy: str,
     safety_flags: list[str],
     raw_note: str,
+    provider_profile: str | None = None,
+    provider_model: str | None = None,
+    provider_mode: str | None = None,
 ) -> GovernorProposal:
     return GovernorProposal(
         proposal_id=proposal_id,
@@ -685,7 +750,89 @@ def _minimal_proposal(
         required_human_decisions=["Approve proposal apply", "Approve executor dispatch"],
         confidence="LOW",
         safety_flags=safety_flags,
+        provider_profile=provider_profile,
+        provider_model=provider_model,
+        provider_mode=provider_mode,
     )
+
+
+def _proposal_from_provider_response(
+    *,
+    proposal_id: str,
+    task: str,
+    repo_path: str,
+    provider: str,
+    policy_default: str,
+    raw: str,
+    invoke_ok: bool,
+    provider_profile: str | None = None,
+    provider_model: str | None = None,
+    provider_mode: str | None = None,
+    extra_flags: list[str] | None = None,
+) -> GovernorProposal:
+    flags: list[str] = list(extra_flags or [])
+    if provider == PROVIDER_CURSOR_AUTO:
+        flags.extend([SAFETY_FLAG_CURSOR_GOVERNOR, SAFETY_FLAG_READ_ONLY_PROVIDER])
+    confidence = "MEDIUM"
+    if not invoke_ok:
+        flags.append(SAFETY_FLAG_PROVIDER_FAILED)
+        confidence = "LOW"
+    parsed = parse_proposal_json_from_response(raw, task=task, policy=policy_default)
+    if parsed is None:
+        flags.append(SAFETY_FLAG_UNSTRUCTURED)
+        if looks_like_advisor_leak(raw):
+            flags.append(SAFETY_FLAG_ADVISOR_LEAK)
+        confidence = "LOW"
+        return _minimal_proposal(
+            proposal_id=proposal_id,
+            task=task,
+            repo_path=repo_path,
+            provider=provider,
+            policy=policy_default,
+            safety_flags=flags,
+            raw_note=raw[:2000],
+            provider_profile=provider_profile,
+            provider_model=provider_model,
+            provider_mode=provider_mode,
+        )
+    if _is_placeholder_proposal(parsed):
+        flags.append(SAFETY_FLAG_EXAMPLE_ECHO)
+        confidence = "LOW"
+    assumptions = parsed.get("assumptions") or []
+    if (
+        parsed.get("governor_mode")
+        or parsed.get("role") == "chatbang_governor"
+        or (
+            "GOVERNOR_MODE_V12" in raw
+            and any("meta-schema normalized" in str(a) for a in assumptions)
+        )
+    ):
+        flags.append(SAFETY_FLAG_META_SCHEMA)
+        if confidence == "MEDIUM":
+            confidence = "LOW"
+    proposal = proposal_from_parsed(
+        parsed,
+        proposal_id=proposal_id,
+        task=task,
+        repo_path=repo_path,
+        provider=provider,
+        safety_flags=flags,
+        confidence=confidence,
+        provider_profile=provider_profile,
+        provider_model=provider_model,
+        provider_mode=provider_mode,
+    )
+    if SAFETY_FLAG_EXAMPLE_ECHO in flags and not proposal.executor_prompt.strip().startswith("#"):
+        proposal.executor_prompt = (
+            f"# Executor\n\nBounded docs-only task: {task}\n\n"
+            "Edit README.md only: add one bullet linking to docs/CHATBANG_GOVERNOR_MODE.md.\n"
+        )
+        proposal.validator_prompt = (
+            f"# Validator\n\nConfirm README link exists; no code or config changes.\n"
+        )
+    if not invoke_ok:
+        proposal.confidence = "LOW"
+    return proposal
 
 
 def render_proposal_markdown(proposal: GovernorProposal) -> str:
@@ -695,10 +842,20 @@ def render_proposal_markdown(proposal: GovernorProposal) -> str:
         f"- **Status:** {proposal.status}",
         f"- **Confidence:** {proposal.confidence}",
         f"- **Provider:** {proposal.provider}",
-        f"- **Policy:** {proposal.recommended_policy}",
-        f"- **Created:** {proposal.created_at}",
-        "",
     ]
+    if proposal.provider_profile:
+        lines.append(f"- **Provider profile:** `{proposal.provider_profile}`")
+    if proposal.provider_model:
+        lines.append(f"- **Provider model:** {proposal.provider_model}")
+    if proposal.provider_mode:
+        lines.append(f"- **Provider mode:** {proposal.provider_mode}")
+    lines.extend(
+        [
+            f"- **Policy:** {proposal.recommended_policy}",
+            f"- **Created:** {proposal.created_at}",
+            "",
+        ]
+    )
     if proposal.safety_flags:
         lines.append(f"- **Safety flags:** {', '.join(proposal.safety_flags)}")
         lines.append("")
@@ -783,9 +940,15 @@ def propose_governor_mode(
     dry_run: bool = False,
     include_repo_summary: bool = False,
     experimental_wide: bool = False,
+    cursor_profile: str = DEFAULT_CURSOR_GOVERNOR_PROFILE,
+    cursor_timeout: int = 900,
+    allow_disabled_profile: bool = False,
+    allow_write_capable: bool = False,
 ) -> ProposeResult:
-    if provider != "chatbang":
-        return ProposeResult("", Path(), dry_run, False, error=f"Unsupported provider: {provider}")
+    try:
+        validate_provider_name(provider)
+    except ValueError as e:
+        return ProposeResult("", Path(), dry_run, False, error=str(e))
 
     repo = resolve_repo_path(str(repo_path))
     proposal_id = create_proposal_id(task)
@@ -810,12 +973,20 @@ def propose_governor_mode(
         policy_hint=policy_hint,
         extra_question=extra_question,
     )
-    chatbang_message = build_chatbang_propose_message(
-        task,
-        context,
-        policy_hint=policy_hint,
-        extra_question=extra_question,
-    )
+    if provider == PROVIDER_CURSOR_AUTO:
+        wire_message = build_cursor_propose_message(
+            task,
+            context,
+            policy_hint=policy_hint,
+            extra_question=extra_question,
+        )
+    else:
+        wire_message = build_chatbang_propose_message(
+            task,
+            context,
+            policy_hint=policy_hint,
+            extra_question=extra_question,
+        )
 
     pdir.mkdir(parents=True, exist_ok=True)
     (pdir / GOVERNOR_REQUEST_MD).write_text(full_prompt, encoding="utf-8")
@@ -827,85 +998,60 @@ def propose_governor_mode(
             actor="governor",
             action="propose_dry_run",
             output_ref=GOVERNOR_REQUEST_MD,
-            reason="Dry-run: prompt saved; no chatbang call",
+            reason=f"Dry-run: prompt saved; no {provider} call",
         )
         return ProposeResult(proposal_id, pdir, True, True)
 
-    use_prime = "fake_chatbang" in chatbang_command or chatbang_command.strip() == "chatbang"
-    if use_prime:
-        result = run_chatbang_with_session_prime(
-            chatbang_message,
-            session_prime=GOVERNOR_SESSION_PRIME,
-            command=chatbang_command,
-            timeout=timeout,
-            max_output_chars=max_output_chars,
-        )
+    extra_flags: list[str] = []
+    if provider == PROVIDER_CURSOR_AUTO and allow_disabled_profile:
+        try:
+            profiles = load_profiles(config_path(repo))
+            spec = profiles.get(cursor_profile)
+            if spec and not spec.enabled:
+                extra_flags.append(SAFETY_FLAG_DISABLED_PROFILE_ALLOWED)
+        except FileNotFoundError:
+            pass
+
+    gov_provider = get_governor_provider(provider)
+    if provider == PROVIDER_CHATBANG:
+        invoke_opts: dict[str, Any] = {
+            "command": chatbang_command,
+            "timeout": timeout,
+            "max_output_chars": max_output_chars,
+            "session_prime": GOVERNOR_SESSION_PRIME,
+        }
+        invoke_result = gov_provider.invoke(wire_message, repo_path=repo, options=invoke_opts)
     else:
-        result = run_chatbang_once(
-            chatbang_message,
-            command=chatbang_command,
-            timeout=timeout,
-            max_output_chars=max_output_chars,
-        )
-    raw = result.output if result.ok else (result.error or "")
-    parsed = parse_proposal_json_from_response(
-        raw, task=task, policy=policy_default
+        invoke_opts = {
+            "profile_name": cursor_profile,
+            "timeout": cursor_timeout,
+            "allow_disabled_profile": allow_disabled_profile,
+            "allow_write_capable": allow_write_capable,
+        }
+        invoke_result = gov_provider.invoke(wire_message, repo_path=repo, options=invoke_opts)
+
+    raw = invoke_result.output if invoke_result.ok else (
+        (invoke_result.error or "") + "\n" + (invoke_result.output or "")
+    ).strip()
+    proposal = _proposal_from_provider_response(
+        proposal_id=proposal_id,
+        task=task,
+        repo_path=str(repo),
+        provider=provider,
+        policy_default=policy_default,
+        raw=raw,
+        invoke_ok=invoke_result.ok,
+        provider_profile=invoke_result.provider_profile,
+        provider_model=invoke_result.provider_model,
+        provider_mode=invoke_result.provider_mode,
+        extra_flags=extra_flags,
     )
-    flags: list[str] = []
-    confidence = "MEDIUM"
-    if parsed is None:
-        flags.append(SAFETY_FLAG_UNSTRUCTURED)
-        if looks_like_advisor_leak(raw):
-            flags.append(SAFETY_FLAG_ADVISOR_LEAK)
-        confidence = "LOW"
-        proposal = _minimal_proposal(
-            proposal_id=proposal_id,
-            task=task,
-            repo_path=str(repo),
-            provider=provider,
-            policy=policy_default,
-            safety_flags=flags,
-            raw_note=raw[:2000],
-        )
-    else:
-        if _is_placeholder_proposal(parsed):
-            flags.append(SAFETY_FLAG_EXAMPLE_ECHO)
-            confidence = "LOW"
-        assumptions = parsed.get("assumptions") or []
-        if (
-            parsed.get("governor_mode")
-            or parsed.get("role") == "chatbang_governor"
-            or (
-                "GOVERNOR_MODE_V12" in raw
-                and any("meta-schema normalized" in str(a) for a in assumptions)
-            )
-        ):
-            flags.append(SAFETY_FLAG_META_SCHEMA)
-            if confidence == "MEDIUM":
-                confidence = "LOW"
-        proposal = proposal_from_parsed(
-            parsed,
-            proposal_id=proposal_id,
-            task=task,
-            repo_path=str(repo),
-            provider=provider,
-            safety_flags=flags,
-            confidence=confidence,
-        )
-        if SAFETY_FLAG_EXAMPLE_ECHO in flags and not proposal.executor_prompt.strip().startswith("#"):
-            proposal.executor_prompt = (
-                f"# Executor\n\nBounded docs-only task: {task}\n\n"
-                "Edit README.md only: add one bullet linking to docs/CHATBANG_GOVERNOR_MODE.md.\n"
-            )
-            proposal.validator_prompt = (
-                f"# Validator\n\nConfirm README link exists; no code or config changes.\n"
-            )
 
     save_proposal_artifacts(pdir, proposal, raw_response=raw)
     trace = _proposal_trace(pdir, proposal_id)
     trace.append(
         phase="governor_mode",
-        actor="chatbang",
+        actor=provider,
         action="propose",
         output_ref=RAW_RESPONSE_MD,
         reason=f"confidence={proposal.confidence} flags={proposal.safety_flags}",
@@ -954,6 +1100,30 @@ def validate_proposal(
     elif SAFETY_FLAG_UNSTRUCTURED in proposal.safety_flags:
         add("unstructured", "WARN", "Unstructured response allowed via --force-unstructured")
 
+    for flag in _APPLY_BLOCKING_FLAGS:
+        if flag in proposal.safety_flags:
+            add(
+                flag.lower(),
+                "FAIL",
+                f"{flag} — proposal cannot be applied",
+            )
+
+    if proposal.provider == PROVIDER_CURSOR_AUTO:
+        if proposal.provider_mode and "write" in proposal.provider_mode.lower():
+            add("cursor_write_mode", "FAIL", "Cursor Governor provider must be read-only")
+        elif proposal.provider_mode and proposal.provider_mode != "ask/read-only":
+            add("cursor_provider_mode", "WARN", f"Unexpected provider_mode: {proposal.provider_mode}")
+        else:
+            add("cursor_provider_mode", "PASS", "Cursor Governor read-only provider metadata")
+        if SAFETY_FLAG_WRITE_CAPABLE_BLOCKED in proposal.safety_flags:
+            add("write_capable_blocked", "FAIL", "Write-capable Cursor argv blocked for Governor")
+        if SAFETY_FLAG_DISABLED_PROFILE_ALLOWED in proposal.safety_flags:
+            add(
+                "disabled_profile",
+                "WARN",
+                "Proposal used --allow-disabled-profile (discouraged)",
+            )
+
     if SAFETY_FLAG_EXAMPLE_ECHO in proposal.safety_flags:
         add(
             "example_echo",
@@ -990,10 +1160,9 @@ def validate_proposal(
             ),
         ]
     )
-    for pat in _DESTRUCTIVE_PATTERNS:
-        if pat.search(blob):
-            add("destructive", "FAIL", f"Destructive pattern matched: {pat.pattern}")
-            break
+    viol = _destructive_pattern_violation(blob)
+    if viol is not None:
+        add("destructive", "FAIL", f"Destructive pattern matched: {viol.pattern}")
     else:
         add("destructive", "PASS", "No destructive deployment/merge/push patterns")
 
@@ -1084,6 +1253,7 @@ def list_proposals(repo_path: Path) -> list[dict[str, Any]]:
                     "status": data.get("status", "?"),
                     "task": (data.get("task") or "")[:80],
                     "confidence": data.get("confidence", "?"),
+                    "provider": data.get("provider", "?"),
                 }
             )
         except (OSError, json.JSONDecodeError):
@@ -1264,3 +1434,85 @@ def apply_proposal(
     print(f"  python -m governor run resume --run-id {meta.run_id} --approve --repo-path .")
 
     return ApplyResult(proposal_id, meta.run_id, False, True, True)
+
+
+def compare_governor_proposals(
+    repo_path: Path,
+    task: str,
+    *,
+    providers: list[str],
+    policy_hint: str | None = None,
+    extra_question: str | None = None,
+    chatbang_command: str = "chatbang",
+    chatbang_timeout: int = 300,
+    cursor_profile: str = DEFAULT_CURSOR_GOVERNOR_PROFILE,
+    cursor_timeout: int = 900,
+    allow_disabled_profile: bool = False,
+) -> tuple[str, Path, list[ProposeResult]]:
+    """Create one proposal per provider and write comparison.md (no apply)."""
+    repo = resolve_repo_path(str(repo_path))
+    compare_id = create_proposal_id(f"compare-{task[:40]}")
+    compare_dir = proposals_dir(repo) / compare_id
+    compare_dir.mkdir(parents=True, exist_ok=True)
+    results: list[ProposeResult] = []
+    sections: list[str] = [
+        f"# Governor provider comparison `{compare_id}`",
+        "",
+        f"**Task:** {task}",
+        "",
+    ]
+    for prov in providers:
+        validate_provider_name(prov)
+        result = propose_governor_mode(
+            repo,
+            task,
+            provider=prov,
+            policy_hint=policy_hint,
+            extra_question=extra_question,
+            chatbang_command=chatbang_command,
+            timeout=chatbang_timeout,
+            cursor_profile=cursor_profile,
+            cursor_timeout=cursor_timeout,
+            allow_disabled_profile=allow_disabled_profile,
+        )
+        results.append(result)
+        if not result.ok:
+            sections.append(f"## {prov}\n\n**Error:** {result.error}\n")
+            continue
+        _, proposal = load_proposal(repo, result.proposal_id)
+        sections.extend(
+            [
+                f"## {prov}",
+                "",
+                f"- **Proposal ID:** `{proposal.proposal_id}`",
+                f"- **Confidence:** {proposal.confidence}",
+                f"- **Policy:** {proposal.recommended_policy}",
+                f"- **Flags:** {', '.join(proposal.safety_flags) or '(none)'}",
+                "",
+                "### Task (proposal)",
+                "",
+                proposal.task[:500],
+                "",
+                "### Executor prompt (excerpt)",
+                "",
+                "```",
+                proposal.executor_prompt[:800],
+                "```",
+                "",
+            ]
+        )
+    (compare_dir / "comparison.md").write_text("\n".join(sections), encoding="utf-8")
+    meta = {
+        "compare_id": compare_id,
+        "task": task,
+        "providers": providers,
+        "proposals": [
+            {"provider": p, "proposal_id": r.proposal_id, "ok": r.ok, "error": r.error}
+            for p, r in zip(providers, results, strict=True)
+        ],
+    }
+    (compare_dir / "comparison.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return compare_id, compare_dir, results

@@ -73,9 +73,11 @@ from governor.governed_run import (
     print_run_summary,
 )
 from governor.advisor import ADVISOR_KINDS, ask_advisor
+from governor.governor_providers import DEFAULT_CURSOR_GOVERNOR_PROFILE, GOVERNOR_PROVIDERS
 from governor.governor_mode import (
     PROPOSAL_MD,
     apply_proposal,
+    compare_governor_proposals,
     list_proposals,
     load_proposal,
     propose_governor_mode,
@@ -546,7 +548,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_governor_mode = sub.add_parser(
         "governor",
-        help="Experimental Chatbang Governor Mode (propose/validate/apply; not autopilot)",
+        help="Experimental Governor Mode (chatbang/cursor-auto propose; not autopilot)",
         parents=[parent],
     )
     gov_sub = p_governor_mode.add_subparsers(dest="governor_cmd", required=True)
@@ -561,16 +563,42 @@ def _build_parser() -> argparse.ArgumentParser:
     p_gov_propose.add_argument(
         "--provider",
         default="chatbang",
-        choices=["chatbang"],
-        help="Proposal provider (chatbang only in v1.2)",
+        choices=sorted(GOVERNOR_PROVIDERS),
+        help="Proposal provider: chatbang or cursor-auto (read-only)",
     )
-    p_gov_propose.add_argument("--question", default=None, help="Extra instruction for chatbang")
+    p_gov_propose.add_argument("--question", default=None, help="Extra instruction for provider")
     p_gov_propose.add_argument(
         "--chatbang-command",
         default="chatbang",
-        help="Chatbang executable command",
+        help="Chatbang executable (provider=chatbang)",
     )
-    p_gov_propose.add_argument("--timeout", type=int, default=300, help="Seconds (max 900)")
+    p_gov_propose.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Chatbang timeout seconds (max 900; cursor uses --cursor-timeout)",
+    )
+    p_gov_propose.add_argument(
+        "--cursor-profile",
+        default=DEFAULT_CURSOR_GOVERNOR_PROFILE,
+        help="Config profile for cursor-auto provider",
+    )
+    p_gov_propose.add_argument(
+        "--cursor-timeout",
+        type=int,
+        default=900,
+        help="Cursor-auto timeout seconds (max 1800)",
+    )
+    p_gov_propose.add_argument(
+        "--allow-disabled-profile",
+        action="store_true",
+        help="Allow disabled cursor-governor profile (discouraged)",
+    )
+    p_gov_propose.add_argument(
+        "--allow-write-capable-governor-provider",
+        action="store_true",
+        help="Discouraged: skip ask-mode argv check for cursor-auto",
+    )
     p_gov_propose.add_argument("--max-output-chars", type=int, default=30000)
     p_gov_propose.add_argument("--dry-run", action="store_true")
     p_gov_propose.add_argument(
@@ -584,6 +612,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Include redacted profile argv in context",
     )
     p_gov_propose.add_argument("--json", action="store_true", dest="as_json")
+
+    p_gov_compare = gov_sub.add_parser(
+        "compare",
+        help="Propose with multiple providers and write comparison.md (no apply)",
+        parents=[parent],
+    )
+    p_gov_compare.add_argument("--task", required=True)
+    p_gov_compare.add_argument("--policy", default=None, metavar="NAME")
+    p_gov_compare.add_argument(
+        "--providers",
+        default="chatbang,cursor-auto",
+        help="Comma-separated providers",
+    )
+    p_gov_compare.add_argument("--question", default=None)
+    p_gov_compare.add_argument("--chatbang-command", default="chatbang")
+    p_gov_compare.add_argument("--timeout", type=int, default=300)
+    p_gov_compare.add_argument("--cursor-profile", default=DEFAULT_CURSOR_GOVERNOR_PROFILE)
+    p_gov_compare.add_argument("--cursor-timeout", type=int, default=900)
+    p_gov_compare.add_argument("--allow-disabled-profile", action="store_true")
+    p_gov_compare.add_argument("--json", action="store_true", dest="as_json")
 
     p_gov_validate = gov_sub.add_parser(
         "validate",
@@ -1618,6 +1666,7 @@ def _run_advisor_ask(args: argparse.Namespace, *, kind_override: str | None = No
 
 def cmd_governor_propose(args: argparse.Namespace) -> int:
     timeout = min(max(args.timeout, 30), 900)
+    cursor_timeout = min(max(args.cursor_timeout, 30), 1800)
     repo = resolve_repo_path(_repo_path_from_args(args))
     try:
         result = propose_governor_mode(
@@ -1632,6 +1681,10 @@ def cmd_governor_propose(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             include_repo_summary=args.include_repo_summary,
             experimental_wide=args.experimental_allow_wide_context,
+            cursor_profile=args.cursor_profile,
+            cursor_timeout=cursor_timeout,
+            allow_disabled_profile=args.allow_disabled_profile,
+            allow_write_capable=args.allow_write_capable_governor_provider,
         )
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -1652,6 +1705,55 @@ def cmd_governor_propose(args: argparse.Namespace) -> int:
         if result.dry_run:
             print("Dry-run: prompt preview only (propose_prompt_preview.md)")
     return 0
+
+
+def cmd_governor_compare(args: argparse.Namespace) -> int:
+    timeout = min(max(args.timeout, 30), 900)
+    cursor_timeout = min(max(args.cursor_timeout, 30), 1800)
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    providers = [p.strip() for p in args.providers.split(",") if p.strip()]
+    try:
+        compare_id, compare_dir, results = compare_governor_proposals(
+            repo,
+            args.task,
+            providers=providers,
+            policy_hint=args.policy,
+            extra_question=args.question,
+            chatbang_command=args.chatbang_command,
+            chatbang_timeout=timeout,
+            cursor_profile=args.cursor_profile,
+            cursor_timeout=cursor_timeout,
+            allow_disabled_profile=args.allow_disabled_profile,
+        )
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "compare_id": compare_id,
+                    "compare_dir": str(compare_dir),
+                    "results": [
+                        {
+                            "proposal_id": r.proposal_id,
+                            "ok": r.ok,
+                            "error": r.error,
+                        }
+                        for r in results
+                    ],
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+    else:
+        print(f"Compare: {compare_id}")
+        print(f"Folder: {compare_dir}")
+        for r in results:
+            status = "OK" if r.ok else f"FAIL ({r.error})"
+            print(f"  {r.proposal_id or '?'} — {status}")
+    return 0 if all(r.ok for r in results) else 1
 
 
 def cmd_governor_validate(args: argparse.Namespace) -> int:
@@ -1894,6 +1996,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "governor":
         gov_handlers = {
             "propose": cmd_governor_propose,
+            "compare": cmd_governor_compare,
             "validate": cmd_governor_validate,
             "list": cmd_governor_list,
             "show": cmd_governor_show,

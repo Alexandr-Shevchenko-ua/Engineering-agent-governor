@@ -1,6 +1,6 @@
 # Chatbang Governor Mode (experimental)
 
-**Version:** v1.2.0  
+**Version:** v1.3.0 (chatbang provider; see also [CURSOR_GOVERNOR_PROVIDER.md](CURSOR_GOVERNOR_PROVIDER.md) for `cursor-auto`)
 **Status:** Experimental — not autopilot.
 
 ## What it is
@@ -32,7 +32,7 @@ Chatbang Governor Mode does **not**:
 
 ## Proposal lifecycle
 
-1. **Propose** — `python -m governor governor propose --task "..." --repo-path .`
+1. **Propose** — `python -m governor governor propose --task "..." --provider chatbang --repo-path .`
 2. **Validate** — `python -m governor governor validate --proposal <id> --repo-path .`
 3. **Review** — `python -m governor governor show --proposal <id> --repo-path .`
 4. **Apply** (optional) — `python -m governor governor apply --proposal <id> --approve --repo-path .`

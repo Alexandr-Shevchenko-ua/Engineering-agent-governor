@@ -17,6 +17,7 @@ from governor.governor_mode import (
     SAFETY_FLAG_ADVISOR_LEAK,
     SAFETY_FLAG_UNSTRUCTURED,
     GovernorProposal,
+    _destructive_pattern_violation,
     apply_proposal,
     create_proposal_id,
     looks_like_advisor_leak,
@@ -307,3 +308,46 @@ def test_docs_mention_experimental() -> None:
     text = (DOCS / "CHATBANG_GOVERNOR_MODE.md").read_text(encoding="utf-8")
     assert "experimental" in text.lower()
     assert "not" in text.lower() and "autopilot" in text.lower()
+
+
+def test_destructive_negation_allows_do_not_git_push() -> None:
+    blob = "Scope:\n- Do **not** run git push, merge, or deploy.\n"
+    assert _destructive_pattern_violation(blob) is None
+
+
+def test_destructive_still_flags_bare_git_push() -> None:
+    blob = "Then run git push to origin main."
+    viol = _destructive_pattern_violation(blob)
+    assert viol is not None
+
+
+def test_validate_passes_when_executor_forbids_push(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _init_project_and_config(tmp_path)
+    pid = create_proposal_id("negation validate")
+    pdir = proposals_dir(tmp_path) / pid
+    pdir.mkdir(parents=True)
+    proposal = GovernorProposal(
+        proposal_id=pid,
+        created_at="2026-05-25T12:00:00Z",
+        provider="cursor-auto",
+        task="docs link",
+        repo_path=str(tmp_path),
+        recommended_policy="docs",
+        assumptions=["docs only"],
+        risk_register=["scope creep"],
+        acceptance_criteria=["README updated"],
+        executor_prompt="# Executor\n\nDo **not** run git push or deploy.\n",
+        validator_prompt="# Validator\n\nCheck README only.\n",
+        recommended_profiles={"executor": "echo-test", "validator": "fake-validator"},
+        stop_conditions=["gate fail"],
+        required_human_decisions=["approve"],
+        confidence="HIGH",
+        safety_flags=["CURSOR_GOVERNOR_PROVIDER", "READ_ONLY_PROVIDER"],
+        provider_mode="ask/read-only",
+    )
+    save_proposal_artifacts(pdir, proposal, raw_response="{}")
+    result = validate_proposal(tmp_path, pid)
+    assert result.ok
+    destructive = next(d for d in result.decisions if d.check == "destructive")
+    assert destructive.status == "PASS"

@@ -28,6 +28,13 @@
       "timeout": 1800,
       "enabled": false
     },
+    "cursor-governor-auto": {
+      "runner": "command",
+      "description": "Cursor Headless ask/read-only Governor provider (model auto). Fill argv locally.",
+      "argv": [],
+      "timeout": 900,
+      "enabled": false
+    },
     "chatbang-local": {
       "runner": "command",
       "description": "Not for executor — use: governor advisor ask --provider chatbang",

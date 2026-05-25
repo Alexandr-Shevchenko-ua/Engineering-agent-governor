@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-**v1.2.0** — local control plane (Cursor Headless executor, Chatbang Governor Advisor, **experimental Chatbang Governor Mode**) for agent-delegated engineering: auditable runs, gates, plans, evidence, and review packages. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
+**v1.3.0** — local control plane (Cursor Headless executor, Chatbang Governor Advisor, **experimental Governor Mode** with chatbang and **Cursor Governor Provider** `cursor-auto`) for agent-delegated engineering: auditable runs, gates, plans, evidence, and review packages. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
 
 ## Not autopilot
 
@@ -70,7 +70,7 @@ Human → governor CLI → .governor/runs/<run-id>/artifacts
 | Agents | `dispatch`, `record`, `repair`, `plan` |
 | Handoff | `evidence`, `review` |
 | Config | `config`, `project`, `policy`, `version` |
-| Experimental | `governor propose`, `validate`, `apply` (chatbang planner) |
+| Experimental | `governor propose`, `validate`, `apply`, `compare` (`chatbang` or `cursor-auto` planner) |
 
 Full reference: **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)**
 
@@ -90,6 +90,8 @@ CI: `.github/workflows/ci.yml` (Python 3.11 / 3.12, pytest, smokes).
 - [docs/SELF_DOGFOODING.md](docs/SELF_DOGFOODING.md)
 - [docs/RUNNER_PROFILE_LOCAL_SETUP.md](docs/RUNNER_PROFILE_LOCAL_SETUP.md)
 - [docs/CURSOR_HEADLESS_RUNNER.md](docs/CURSOR_HEADLESS_RUNNER.md)
+- [docs/CURSOR_GOVERNOR_PROVIDER.md](docs/CURSOR_GOVERNOR_PROVIDER.md) — Cursor `cursor-auto` proposal provider (read-only)
+- [docs/CHATBANG_GOVERNOR_MODE.md](docs/CHATBANG_GOVERNOR_MODE.md) — Chatbang proposal lifecycle
 - [docs/CHATBANG_GOVERNOR_ADVISOR.md](docs/CHATBANG_GOVERNOR_ADVISOR.md)
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
 - [docs/DOGFOODING.md](docs/DOGFOODING.md)

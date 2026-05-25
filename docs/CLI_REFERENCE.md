@@ -353,24 +353,31 @@ See [CHATBANG_GOVERNOR_ADVISOR.md](CHATBANG_GOVERNOR_ADVISOR.md).
 
 ---
 
-## governor (experimental — Chatbang Governor Mode)
+## governor (experimental — Governor Mode)
 
-chatbang proposes a bounded run; Governor validates; human `--approve` apply. **Does not** execute Cursor or change the git tree on propose/apply.
+Providers propose a bounded run; Governor validates; human `--approve` apply. **Does not** execute repo changes on propose/apply.
 
 ```bash
 python -m governor governor propose --task "..." --provider chatbang --repo-path .
+python -m governor governor propose --task "..." --provider cursor-auto --cursor-profile cursor-governor-auto --repo-path .
+python -m governor governor compare --task "..." --providers chatbang,cursor-auto --repo-path .
 python -m governor governor validate --proposal <id> --repo-path .
 python -m governor governor show --proposal <id> --repo-path .
 python -m governor governor reject --proposal <id> --reason "..." --repo-path .
-python -m governor governor apply --proposal <id> --repo-path .
 python -m governor governor apply --proposal <id> --approve --repo-path .
 ```
 
+| propose flag | Default | Notes |
+|--------------|---------|--------|
+| `--provider` | `chatbang` | `chatbang` or `cursor-auto` (read-only) |
+| `--cursor-profile` | `cursor-governor-auto` | Local config profile |
+| `--cursor-timeout` | `900` | Max `1800` |
+
 **Artifacts:** `.governor/proposals/<id>/` (`proposal.json`, `proposal.md`, `raw_chatbang_response.md`)
 
-Apply (v1.2) creates **run + plan only** — use `governor run resume --approve` to execute.
+Apply creates **run + plan only** — use `governor run resume --approve` to execute with an **executor** profile.
 
-See [CHATBANG_GOVERNOR_MODE.md](CHATBANG_GOVERNOR_MODE.md).
+See [CHATBANG_GOVERNOR_MODE.md](CHATBANG_GOVERNOR_MODE.md), [CURSOR_GOVERNOR_PROVIDER.md](CURSOR_GOVERNOR_PROVIDER.md).
 
 ---
 

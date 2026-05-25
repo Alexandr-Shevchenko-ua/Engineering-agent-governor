@@ -3,6 +3,8 @@
 **Role:** Cursor Headless CLI is the **executor** runner — it implements tasks in the target repo.  
 **Not:** chatbang (semantic advisor) or Governor autopilot.
 
+**Governor provider (v1.3):** profile `cursor-governor-auto` uses Cursor in **ask/read-only** mode for **proposals only** (`--provider cursor-auto`). That is separate from executor profiles `cursor-headless-local` / `cursor-headless-ask-local`. See [CURSOR_GOVERNOR_PROVIDER.md](CURSOR_GOVERNOR_PROVIDER.md).
+
 Governor does **not** ship Cursor argv syntax or personal paths. You verify Headless CLI on your machine, then fill **`cursor-headless-local`** in gitignored `.governor/config.json`.
 
 ## Safety
