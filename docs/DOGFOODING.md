@@ -49,6 +49,17 @@ Inspect artifacts under `.governor/runs/<run-id>/` before merging. That director
 
 Optional: `doctor` before starting; `list` / `status` anytime.
 
+## Repair workflow (v0.4)
+
+See [REPAIR_WORKFLOW.md](REPAIR_WORKFLOW.md). Summary: `repair prepare` → preview/approve `dispatch --role repair` → **manual** `gate` again.
+
+```bash
+python -m governor repair prepare --run-id "$RUN_ID" --repo-path .
+python -m governor dispatch --run-id "$RUN_ID" --role repair --profile echo-test --repo-path .
+python -m governor dispatch --run-id "$RUN_ID" --role repair --profile echo-test --approve --repo-path .
+python -m governor gate --run-id "$RUN_ID" --repo-path .
+```
+
 ## Runner profiles (v0.3)
 
 Local config only (gitignored): `.governor/config.json`. See [RUNNER_PROFILES.md](RUNNER_PROFILES.md).
@@ -144,4 +155,5 @@ python -m governor doctor --repo-path .
 python scripts/smoke_governor_workflow.py
 python scripts/smoke_dispatch_workflow.py
 python scripts/smoke_profile_workflow.py
+python scripts/smoke_repair_workflow.py
 ```

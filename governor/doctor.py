@@ -7,9 +7,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from governor.config import config_path, validate_config_file
 from governor.gates import is_git_worktree
 from governor.index import index_path, load_index
 from governor.utils import resolve_repo_path, runs_dir
+
+CONFIG_INIT_HINT = "python -m governor config init --repo-path ."
 
 
 @dataclass
@@ -89,6 +92,35 @@ def _check_latest_run_state(repo: Path) -> CheckResult:
         return CheckResult("latest_run_state", "FAIL", str(e))
 
 
+def _check_config(repo: Path) -> CheckResult:
+    path = config_path(repo)
+    if not path.is_file():
+        return CheckResult(
+            "governor_config",
+            "WARN",
+            f"config missing at {path}; run: {CONFIG_INIT_HINT}",
+        )
+    lines, has_fail = validate_config_file(path, repo)
+    if has_fail:
+        fails = [ln.message for ln in lines if ln.level == "FAIL"][:3]
+        return CheckResult(
+            "governor_config",
+            "FAIL",
+            "; ".join(fails) or "invalid config",
+        )
+    try:
+        from governor.config import load_profiles
+
+        profiles = len(load_profiles(path))
+    except ValueError:
+        profiles = 0
+    return CheckResult(
+        "governor_config",
+        "OK",
+        f"valid config, {profiles} profile(s)",
+    )
+
+
 def _check_optional_tool(name: str) -> CheckResult:
     if shutil.which(name):
         return CheckResult(f"tool_{name}", "OK", f"{name} available")
@@ -106,6 +138,7 @@ def run_doctor(repo_path: str | None = None) -> tuple[list[CheckResult], int]:
         _check_repo_path(repo),
         _check_git(repo),
         _check_runs(repo),
+        _check_config(repo),
         _check_index(repo),
         _check_latest_run_state(repo),
         _check_optional_tool("git"),

@@ -11,8 +11,14 @@ from governor.models import (
     RunMetadata,
     RunState,
     record_action_for_role,
+    repair_failed_output_name,
     require_transition,
     transition_state,
+)
+from governor.repair_artifacts import (
+    REPAIR_PREPARE_HINT,
+    has_repair_prompt,
+    repair_output_name,
 )
 from governor.redaction import redact
 from governor.templates import (
@@ -121,8 +127,10 @@ class RunStore:
         trace = TraceLogger(run_dir, meta.run_id)
 
         if role == "repair":
+            if not has_repair_prompt(run_dir):
+                raise ValueError(REPAIR_PREPARE_HINT.format(run_id=run_id))
             meta.repair_count += 1
-            out_name = f"07_repair_output_{meta.repair_count}.md"
+            out_name = repair_output_name(meta.repair_count)
         elif role in ROLE_OUTPUT_FILES:
             out_name = ROLE_OUTPUT_FILES[role]
         else:
@@ -202,6 +210,54 @@ class RunStore:
             raise ValueError(f"No failed artifact mapping for role: {role}")
         out_path = run_dir / ROLE_FAILED_OUTPUT_FILES[role]
         out_path.write_text(content, encoding="utf-8")
+        return out_path
+
+    def write_failed_repair_dispatch(
+        self,
+        run_dir: Path,
+        repair_index: int,
+        content: str,
+    ) -> Path:
+        out_path = run_dir / repair_failed_output_name(repair_index)
+        out_path.write_text(content, encoding="utf-8")
+        return out_path
+
+    def apply_repair_dispatch_output(
+        self,
+        run_id: str,
+        repair_index: int,
+        content: str,
+        *,
+        replace: bool = False,
+        dispatch_cmd: str | None = None,
+    ) -> Path:
+        run_dir, meta = self.get_run(run_id)
+        out_name = repair_output_name(repair_index)
+        out_path = run_dir / out_name
+        action = "record_repair"
+        state = RunState(meta.state)
+
+        had_existing = out_path.exists()
+        if had_existing and not replace:
+            raise FileExistsError(
+                f"{out_name} already exists for run {run_id}. "
+                f"Use --replace to overwrite (audit trail protection)."
+            )
+
+        if replace and had_existing:
+            next_state = state
+        else:
+            next_state = require_transition(state, action)
+
+        out_path.write_text(content, encoding="utf-8")
+        meta.repair_count = max(meta.repair_count, repair_index)
+        meta.state = next_state.value
+        cmd = dispatch_cmd or (
+            f"python -m governor dispatch --run-id {run_id} --role repair "
+            f"--repair-prompt {repair_index} --approve"
+        )
+        meta.commands_executed.append(cmd)
+        self.save_metadata(run_dir, meta)
         return out_path
 
     def apply_dispatch_output(

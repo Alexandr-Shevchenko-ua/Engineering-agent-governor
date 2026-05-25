@@ -95,7 +95,7 @@ NEXT_ACTIONS: dict[RunState, str] = {
     RunState.EXECUTOR_OUTPUT_RECORDED: "Run: governor gate --run-id <id>, then paste 04_validator_prompt.md and record validator output.",
     RunState.GATES_RUN: "Paste 04_validator_prompt.md into Cursor Agent, then: governor record --role validator",
     RunState.VALIDATOR_OUTPUT_RECORDED: "Review validator verdict; run gate again if needed, or: governor report --run-id <id>",
-    RunState.REPAIR_RECORDED: "Re-run executor or validator as needed; gate and report when ready.",
+    RunState.REPAIR_RECORDED: "Run: governor gate --run-id <id> again, then validator/report as needed.",
     RunState.FINAL_REPORT_READY: "Review 09_final_report.md and 10_lead_update.md; archive or start a new run.",
     RunState.HUMAN_DECISION_REQUIRED: "Lead must decide before merge/apply; document decision in human_notes.md.",
 }
@@ -111,6 +111,10 @@ ROLE_FAILED_OUTPUT_FILES: dict[str, str] = {
     "executor": "05_executor_output.failed.md",
     "validator": "06_validator_output.failed.md",
 }
+
+
+def repair_failed_output_name(index: int) -> str:
+    return f"07_repair_output_{index}.failed.md"
 
 
 def record_action_for_role(role: str) -> str:
@@ -130,6 +134,7 @@ class RunMetadata:
     created_at: str
     updated_at: str
     repair_count: int = 0
+    repair_prompt_count: int = 0
     commands_executed: list[str] = field(default_factory=list)
     outcome: str | None = None
 
@@ -146,6 +151,7 @@ class RunMetadata:
             created_at=data["created_at"],
             updated_at=data["updated_at"],
             repair_count=data.get("repair_count", 0),
+            repair_prompt_count=data.get("repair_prompt_count", 0),
             commands_executed=list(data.get("commands_executed", [])),
             outcome=data.get("outcome"),
         )

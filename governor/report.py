@@ -6,6 +6,11 @@ import json
 from pathlib import Path
 
 from governor.models import NEXT_ACTIONS, RunState, require_transition
+from governor.repair_artifacts import (
+    list_repair_artifacts,
+    list_repair_outputs,
+    list_repair_prompts,
+)
 from governor.run_store import RunStore
 from governor.verdict import parse_validator_verdict
 
@@ -61,6 +66,7 @@ def compute_outcome(
     has_gates: bool,
     state: str,
     has_executor: bool,
+    repair_count: int = 0,
 ) -> str:
     """Explicit outcome for final report."""
     if verdict:
@@ -80,6 +86,8 @@ def compute_outcome(
         return "GATES_WARN_NO_VALIDATOR"
     if gate_overall == "PASS":
         return "GATES_PASS_NO_VALIDATOR"
+    if repair_count > 0 and state == RunState.REPAIR_RECORDED.value:
+        return "REPAIR_RECORDED_NO_POST_REPAIR_GATE"
     return "IN_PROGRESS"
 
 
@@ -135,6 +143,7 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
         has_gates=has_gates,
         state=meta.state,
         has_executor=executor_out is not None,
+        repair_count=meta.repair_count,
     )
 
     human_decision = (
@@ -197,6 +206,27 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
     ]
     if verdict:
         report_lines.extend(["", f"**Validator verdict:** {verdict}", ""])
+
+    repair_art = list_repair_artifacts(run_dir)
+    prompts_n = list_repair_prompts(run_dir)
+    outputs_n = list_repair_outputs(run_dir)
+    report_lines.extend(
+        [
+            "## Repair history",
+            "",
+            f"- Repair prompts: {len(prompts_n)} (`{', '.join(repair_art['prompts']) or 'none'}`)",
+            f"- Repair outputs: {len(outputs_n)} (`{', '.join(repair_art['outputs']) or 'none'}`)",
+            f"- repair_count: {meta.repair_count}",
+            f"- repair_prompt_count: {getattr(meta, 'repair_prompt_count', len(prompts_n))}",
+        ]
+    )
+    if repair_art["failed"]:
+        report_lines.append(f"- Failed diagnostics: {', '.join(repair_art['failed'])}")
+    if meta.repair_count > 0 and meta.state == RunState.REPAIR_RECORDED.value:
+        report_lines.append(
+            "- **Caution:** repair recorded; re-run `gate` before trusting outcome."
+        )
+    report_lines.append("")
 
     report_lines.extend(
         [

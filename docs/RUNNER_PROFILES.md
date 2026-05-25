@@ -22,6 +22,15 @@ python -m governor config validate --repo-path .
 python -m governor config show --repo-path .
 ```
 
+Repair dispatch uses the same profiles:
+
+```bash
+python -m governor repair prepare --run-id "$RUN_ID" --repo-path .
+python -m governor dispatch --run-id "$RUN_ID" --role repair --profile echo-test --approve --repo-path .
+```
+
+See [REPAIR_WORKFLOW.md](REPAIR_WORKFLOW.md).
+
 ## Dispatch with a profile
 
 Preview first (no output artifact):

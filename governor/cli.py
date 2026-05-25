@@ -29,6 +29,7 @@ from governor.doctor import run_doctor
 from governor.gates import run_gates, write_gate_artifacts
 from governor.index import list_entries
 from governor.models import NEXT_ACTIONS, RunState
+from governor.repair import list_repair_artifacts, prepare_repair
 from governor.report import generate_reports
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
@@ -99,7 +100,18 @@ def _build_parser() -> argparse.ArgumentParser:
         parents=[parent],
     )
     p_dispatch.add_argument("--run-id", required=True)
-    p_dispatch.add_argument("--role", required=True, choices=["executor", "validator"])
+    p_dispatch.add_argument(
+        "--role",
+        required=True,
+        choices=["executor", "validator", "repair"],
+    )
+    p_dispatch.add_argument(
+        "--repair-prompt",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Repair prompt index (11_repair_prompt_N.md); default: latest",
+    )
     runner_group = p_dispatch.add_mutually_exclusive_group(required=True)
     runner_group.add_argument(
         "--runner",
@@ -166,6 +178,43 @@ def _build_parser() -> argparse.ArgumentParser:
     config_sub.add_parser("validate", help="Validate config.json", parents=[parent])
     config_sub.add_parser("path", help="Print expected config path", parents=[parent])
 
+    p_repair = sub.add_parser(
+        "repair",
+        help="Prepare bounded repair prompts (not autopilot)",
+        parents=[parent],
+    )
+    repair_sub = p_repair.add_subparsers(dest="repair_cmd", required=True)
+
+    p_rep_prepare = repair_sub.add_parser(
+        "prepare",
+        help="Generate 11_repair_prompt_N.md from gate/validator context",
+        parents=[parent],
+    )
+    p_rep_prepare.add_argument("--run-id", required=True)
+    p_rep_prepare.add_argument(
+        "--reason",
+        default="Address gate/validator findings",
+        help="Short reason shown in repair prompt",
+    )
+    p_rep_prepare.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow prepare from unusual states or exceed max prompts",
+    )
+    p_rep_prepare.add_argument(
+        "--max-repairs",
+        type=int,
+        default=2,
+        help="Max repair prompts per run (default 2)",
+    )
+
+    p_rep_list = repair_sub.add_parser(
+        "list",
+        help="List repair prompts and outputs for a run",
+        parents=[parent],
+    )
+    p_rep_list.add_argument("--run-id", required=True)
+
     return parser
 
 
@@ -195,6 +244,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Updated:    {meta.updated_at}")
     print(f"Folder:     {run_dir}")
     print(f"Outcome:    {meta.outcome or '(pending)'}")
+    print(f"Repair:     count={meta.repair_count} prompts={getattr(meta, 'repair_prompt_count', 0)}")
     print(f"Artifacts:  {', '.join(artifacts)}")
     print(f"Next:       {NEXT_ACTIONS.get(RunState(meta.state), 'See run_state.json')}")
     return 0
@@ -302,6 +352,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def _print_dispatch_preview(preview) -> None:
     print(f"Run ID:        {preview.run_id}")
     print(f"Role:          {preview.role}")
+    if preview.role == "repair" and preview.repair_prompt_index is not None:
+        print(f"Repair prompt: {preview.repair_prompt_index}")
     if preview.profile_name:
         print(f"Profile:       {preview.profile_name}")
     print(f"Prompt file:   {preview.prompt_path}")
@@ -325,6 +377,8 @@ def _resolve_dispatch_runner(
     if args.profile:
         profile_name = args.profile
         cfg_p = config_path(repo)
+        if not cfg_p.is_file():
+            raise FileNotFoundError(CONFIG_NOT_FOUND_MSG)
         prof, spec = get_profile(
             repo,
             profile_name,
@@ -355,6 +409,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
                 replace=args.replace,
                 profile_name=profile_name,
                 config_path=cfg_p,
+                repair_prompt_index=args.repair_prompt,
             )
             _print_dispatch_preview(preview)
             return 0
@@ -368,6 +423,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             repo_path=repo_path,
             accept_failed_output=args.accept_failed_output,
             profile_name=profile_name,
+            repair_prompt_index=args.repair_prompt,
         )
         _, meta = store.get_run(args.run_id)
         print(f"Dispatched {args.role} -> {out_path.name}")
@@ -379,12 +435,59 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         print(f"Next:      {NEXT_ACTIONS.get(RunState(meta.state), '')}")
         return 0 if result.exit_code == 0 else 1
     except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        msg = str(e)
+        if msg == CONFIG_NOT_FOUND_MSG:
+            print(msg, file=sys.stderr)
+        else:
+            print(f"Error: {e}", file=sys.stderr)
         return 1
     except FileExistsError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_repair_prepare(args: argparse.Namespace) -> int:
+    try:
+        store = open_store(_repo_path_from_args(args))
+        path = prepare_repair(
+            store,
+            args.run_id,
+            reason=args.reason,
+            force=args.force,
+            max_repairs=args.max_repairs,
+        )
+        print(f"Wrote: {path.name}")
+        print("Warning: repair is bounded — fix only listed issues; do not broaden scope.")
+        print("Next: paste prompt into agent, then dispatch/record repair, then gate again.")
+        return 0
+    except (FileNotFoundError, FileExistsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_repair_list(args: argparse.Namespace) -> int:
+    try:
+        store = open_store(_repo_path_from_args(args))
+        run_dir, meta = store.get_run(args.run_id)
+        art = list_repair_artifacts(run_dir)
+        print(f"Run ID: {meta.run_id}")
+        print(f"State:  {meta.state}")
+        print(f"repair_count={meta.repair_count} repair_prompt_count={getattr(meta, 'repair_prompt_count', 0)}")
+        print("Prompts:")
+        for p in art["prompts"] or ["(none)"]:
+            print(f"  - {p}")
+        print("Outputs:")
+        for o in art["outputs"] or ["(none)"]:
+            print(f"  - {o}")
+        if art["failed"]:
+            print("Failed diagnostics:")
+            for f in art["failed"]:
+                print(f"  - {f}")
+        return 0
+    except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
@@ -490,6 +593,12 @@ def main(argv: list[str] | None = None) -> int:
             "path": cmd_config_path,
         }
         return config_handlers[args.config_cmd](args)
+    if args.command == "repair":
+        repair_handlers = {
+            "prepare": cmd_repair_prepare,
+            "list": cmd_repair_list,
+        }
+        return repair_handlers[args.repair_cmd](args)
     return handlers[args.command](args)
 
 

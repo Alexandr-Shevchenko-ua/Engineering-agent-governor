@@ -23,16 +23,21 @@ ROLE_PROMPT_FILES: dict[str, str] = {
     "validator": "04_validator_prompt.md",
 }
 
-DISPATCH_ROLES = frozenset(ROLE_PROMPT_FILES.keys())
+DISPATCH_ROLES = frozenset((*ROLE_PROMPT_FILES.keys(), "repair"))
 DEFAULT_TIMEOUT = 300
 MAX_TIMEOUT = 1800
 
 CURSOR_RUNNER_MESSAGE = """\
-Cursor runner profile is not configured in Governor v0.2.
+The built-in `cursor` runner is a placeholder only — Governor does not ship Cursor CLI syntax.
 
-Use an explicit local command instead, for example:
-  python -m governor dispatch --run-id <id> --role executor \\
-    --runner command --command <your-cursor-cli> --approve --repo-path .
+Configure a trusted local command in `.governor/config.json`, for example:
+  - runner: command
+  - argv: [your-local-cli, ...]   # fill with your trusted executable and args
+
+Then dispatch with:
+  python -m governor dispatch --run-id <id> --role executor --profile <name> --approve --repo-path .
+
+Or use `--runner command --command ...` for one-off runs.
 
 Do not pass secrets on the command line. Review dispatch preview before --approve.
 """
@@ -67,6 +72,7 @@ class DispatchPreview:
     warnings: list[str] = field(default_factory=list)
     profile_name: str | None = None
     config_path: Path | None = None
+    repair_prompt_index: int | None = None
 
 
 @dataclass
@@ -86,11 +92,23 @@ def validate_timeout(timeout: int) -> int:
 
 def validate_role(role: str) -> str:
     if role not in DISPATCH_ROLES:
-        raise ValueError(f"Unsupported dispatch role: {role}. Use executor or validator.")
+        raise ValueError(
+            f"Unsupported dispatch role: {role}. Use executor, validator, or repair."
+        )
     return role
 
 
-def prompt_path_for_role(run_dir: Path, role: str) -> Path:
+def prompt_path_for_role(
+    run_dir: Path,
+    role: str,
+    *,
+    repair_prompt_index: int | None = None,
+) -> Path:
+    if role == "repair":
+        from governor.repair_artifacts import resolve_repair_prompt_path
+
+        path, _ = resolve_repair_prompt_path(run_dir, repair_prompt_index)
+        return path
     name = ROLE_PROMPT_FILES[role]
     path = run_dir / name
     if not path.is_file():
@@ -98,7 +116,19 @@ def prompt_path_for_role(run_dir: Path, role: str) -> Path:
     return path
 
 
-def output_path_for_role(run_dir: Path, role: str) -> Path:
+def output_path_for_role(
+    run_dir: Path,
+    role: str,
+    *,
+    repair_prompt_index: int | None = None,
+) -> Path:
+    if role == "repair":
+        from governor.repair_artifacts import resolve_repair_prompt_path
+
+        _, index = resolve_repair_prompt_path(run_dir, repair_prompt_index)
+        from governor.repair_artifacts import repair_output_name
+
+        return run_dir / repair_output_name(index)
     return run_dir / ROLE_OUTPUT_FILES[role]
 
 
@@ -285,9 +315,19 @@ def _collect_preview_warnings(
     role: str,
     *,
     replace: bool,
+    repair_prompt_index: int | None = None,
 ) -> list[str]:
     warnings: list[str] = []
-    out_path = output_path_for_role(run_dir, role)
+    if role == "repair":
+        from governor.repair_artifacts import has_repair_prompt
+
+        if not has_repair_prompt(run_dir):
+            warnings.append(
+                "No repair prompt; run: governor repair prepare --run-id <id>"
+            )
+    out_path = output_path_for_role(
+        run_dir, role, repair_prompt_index=repair_prompt_index
+    )
     if out_path.exists() and not replace:
         warnings.append(
             "Existing output artifact detected; execution will require --replace"
@@ -302,8 +342,17 @@ def _collect_preview_warnings(
     return warnings
 
 
-def _ensure_execute_replace_allowed(run_dir: Path, role: str, run_id: str, replace: bool) -> None:
-    out_path = output_path_for_role(run_dir, role)
+def _ensure_execute_replace_allowed(
+    run_dir: Path,
+    role: str,
+    run_id: str,
+    replace: bool,
+    *,
+    repair_prompt_index: int | None = None,
+) -> None:
+    out_path = output_path_for_role(
+        run_dir, role, repair_prompt_index=repair_prompt_index
+    )
     if out_path.exists() and not replace:
         raise FileExistsError(
             f"{out_path.name} already exists for run {run_id}. "
@@ -321,12 +370,29 @@ def build_preview(
     replace: bool,
     profile_name: str | None = None,
     config_path: Path | None = None,
+    repair_prompt_index: int | None = None,
 ) -> DispatchPreview:
     run_dir, meta = store.get_run(run_id)
     validate_role(role)
-    prompt_path = prompt_path_for_role(run_dir, role)
-    out_path = output_path_for_role(run_dir, role)
-    warnings = _collect_preview_warnings(run_dir, meta.state, role, replace=replace)
+    prompt_path = prompt_path_for_role(
+        run_dir, role, repair_prompt_index=repair_prompt_index
+    )
+    out_path = output_path_for_role(
+        run_dir, role, repair_prompt_index=repair_prompt_index
+    )
+    warnings = _collect_preview_warnings(
+        run_dir,
+        meta.state,
+        role,
+        replace=replace,
+        repair_prompt_index=repair_prompt_index,
+    )
+    if role == "repair":
+        warnings.append("After repair: run gate again before validator/report.")
+        if repair_prompt_index is None:
+            from governor.repair_artifacts import resolve_repair_prompt_path
+
+            _, repair_prompt_index = resolve_repair_prompt_path(run_dir, None)
     return DispatchPreview(
         run_id=meta.run_id,
         role=role,
@@ -338,6 +404,7 @@ def build_preview(
         warnings=warnings,
         profile_name=profile_name,
         config_path=config_path,
+        repair_prompt_index=repair_prompt_index,
     )
 
 
@@ -351,6 +418,7 @@ def dispatch_command_line(
     repo_path: str,
     accept_failed_output: bool = False,
     profile: str | None = None,
+    repair_prompt: int | None = None,
 ) -> str:
     parts = [
         "python -m governor dispatch",
@@ -367,6 +435,8 @@ def dispatch_command_line(
         parts.append("--approve")
     if accept_failed_output:
         parts.append("--accept-failed-output")
+    if repair_prompt is not None:
+        parts.append(f"--repair-prompt {repair_prompt}")
     parts.append(f"--repo-path {repo_path}")
     return " ".join(parts)
 
@@ -381,6 +451,7 @@ def preview_dispatch(
     replace: bool,
     profile_name: str | None = None,
     config_path: Path | None = None,
+    repair_prompt_index: int | None = None,
 ) -> DispatchPreview:
     preview = build_preview(
         store,
@@ -391,12 +462,15 @@ def preview_dispatch(
         replace=replace,
         profile_name=profile_name,
         config_path=config_path,
+        repair_prompt_index=repair_prompt_index,
     )
     run_dir, meta = store.get_run(run_id)
     trace = TraceLogger(run_dir, meta.run_id)
     reason = f"runner={spec.name} timeout={timeout}s"
     if profile_name:
         reason = f"profile={profile_name} " + reason
+    if repair_prompt_index is not None:
+        reason += f"; repair_prompt={repair_prompt_index}"
     if preview.warnings:
         reason += "; " + "; ".join(preview.warnings)
     trace.append(
@@ -422,16 +496,29 @@ def execute_dispatch(
     repo_path: str,
     accept_failed_output: bool = False,
     profile_name: str | None = None,
+    repair_prompt_index: int | None = None,
 ) -> tuple[Path, DispatchResult]:
     run_dir, meta = store.get_run(run_id)
     validate_role(role)
-    _ensure_execute_replace_allowed(run_dir, role, meta.run_id, replace)
+    if role == "repair":
+        from governor.repair import require_repair_prompt  # noqa: PLC0415
+
+        require_repair_prompt(run_dir, meta.run_id)
+    _ensure_execute_replace_allowed(
+        run_dir,
+        role,
+        meta.run_id,
+        replace,
+        repair_prompt_index=repair_prompt_index,
+    )
     action = record_action_for_role(role)
     from governor.models import RunState
 
     require_transition(RunState(meta.state), action)
 
-    prompt_path = prompt_path_for_role(run_dir, role)
+    prompt_path = prompt_path_for_role(
+        run_dir, role, repair_prompt_index=repair_prompt_index
+    )
     prompt_text = prompt_path.read_text(encoding="utf-8")
     cwd = Path(meta.repo_path)
 
@@ -454,6 +541,7 @@ def execute_dispatch(
         repo_path=repo_path,
         accept_failed_output=accept_failed_output,
         profile=profile_name,
+        repair_prompt=repair_prompt_index,
     )
 
     trace = TraceLogger(run_dir, meta.run_id)
@@ -464,9 +552,16 @@ def execute_dispatch(
     )
     if profile_name:
         trace_reason = f"profile={profile_name} " + trace_reason
+    if repair_prompt_index is not None:
+        trace_reason += f"; repair_prompt={repair_prompt_index}"
 
     if result.exit_code != 0 and not accept_failed_output:
-        failed_path = store.write_failed_dispatch_artifact(run_dir, role, markdown)
+        if role == "repair" and repair_prompt_index is not None:
+            failed_path = store.write_failed_repair_dispatch(
+                run_dir, repair_prompt_index, markdown
+            )
+        else:
+            failed_path = store.write_failed_dispatch_artifact(run_dir, role, markdown)
         trace.append(
             phase="dispatch",
             actor="governor",
@@ -478,13 +573,25 @@ def execute_dispatch(
         )
         return failed_path, result
 
-    out_path = store.apply_dispatch_output(
-        run_id,
-        role,
-        markdown,
-        replace=replace,
-        dispatch_cmd=dispatch_cmd,
-    )
+    if role == "repair":
+        from governor.repair_artifacts import resolve_repair_prompt_path
+
+        _, idx = resolve_repair_prompt_path(run_dir, repair_prompt_index)
+        out_path = store.apply_repair_dispatch_output(
+            run_id,
+            idx,
+            markdown,
+            replace=replace,
+            dispatch_cmd=dispatch_cmd,
+        )
+    else:
+        out_path = store.apply_dispatch_output(
+            run_id,
+            role,
+            markdown,
+            replace=replace,
+            dispatch_cmd=dispatch_cmd,
+        )
     trace.append(
         phase="dispatch",
         actor="governor",

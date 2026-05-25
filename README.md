@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.3.0** adds **local runner profiles** (`.governor/config.json`) for bounded `dispatch --profile` without hardcoding Cursor CLI syntax.
+Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.4.0** adds **bounded repair packs** (`repair prepare`, `dispatch --role repair`) plus **runner profiles** in `.governor/config.json`.
 
 ## What this is
 
@@ -61,6 +61,7 @@ gov init --task "My task" --repo-path .
 | `record` | Store outputs; executor/validator protected unless `--replace` |
 | `dispatch` | Preview or run local runner (`--runner` or `--profile`; `--approve` to execute) |
 | `config` | Manage local runner profiles (`init`, `show`, `validate`, `path`) |
+| `repair` | Prepare repair prompts (`prepare`, `list`) — not autopilot |
 | `gate` | Run local checks → `08_gate_results.json` / `.md` |
 | `report` | Generate `09_final_report.md` and `10_lead_update.md` |
 
@@ -68,7 +69,9 @@ gov init --task "My task" --repo-path .
 
 **Dogfooding:** [docs/DOGFOODING.md](docs/DOGFOODING.md) — using Governor on this repo.
 
-**Smoke tests:** `python scripts/smoke_governor_workflow.py` · `python scripts/smoke_dispatch_workflow.py` · `python scripts/smoke_profile_workflow.py`
+**Repair workflow:** [docs/REPAIR_WORKFLOW.md](docs/REPAIR_WORKFLOW.md)
+
+**Smoke tests:** `smoke_governor_workflow.py` · `smoke_dispatch_workflow.py` · `smoke_profile_workflow.py` · `smoke_repair_workflow.py`
 
 ## Dispatch is not autopilot
 
