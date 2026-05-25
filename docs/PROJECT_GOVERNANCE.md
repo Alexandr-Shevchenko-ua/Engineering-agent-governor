@@ -1,6 +1,6 @@
 # Project governance (`governor.project.json`)
 
-v0.9 adds **tracked, commit-safe** repository governance separate from local runner profiles.
+**v1.0** (since v0.9) uses **tracked, commit-safe** `governor.project.json` for repository governance, separate from local runner profiles in `.governor/config.json`.
 
 ## Two config layers
 

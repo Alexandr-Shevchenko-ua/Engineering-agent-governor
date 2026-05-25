@@ -388,5 +388,6 @@ python -m governor report --run-id <id> --repo-path .
 
 - [PROJECT_GOVERNANCE.md](PROJECT_GOVERNANCE.md)
 - [GOVERNED_RUNS.md](GOVERNED_RUNS.md)
+- [RELEASE_NOTES_v1.0.0.md](RELEASE_NOTES_v1.0.0.md)
 - [RELEASE_NOTES_v1.0.0-rc1.md](RELEASE_NOTES_v1.0.0-rc1.md)
 - [SELF_DOGFOODING.md](SELF_DOGFOODING.md)

@@ -1,4 +1,4 @@
-# Governed runs (v0.8.0)
+# Governed runs (v1.0)
 
 **`governor run start`** compresses the safe delegation workflow into one explicit command. It is **not unsafe autopilot**: no background jobs, no infinite loops, no automatic repair dispatch, and dispatch still requires **`--approve`**.
 

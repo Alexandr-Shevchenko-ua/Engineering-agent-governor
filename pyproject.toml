@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "engineering-agent-governor"
-version = "1.0.0rc1"
+version = "1.0.0"
 description = "Local delegation-first engineering governor harness"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Engineering Agent Governor contributors" }]
 keywords = ["governance", "agents", "engineering", "cli"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",

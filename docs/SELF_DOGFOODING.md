@@ -40,7 +40,7 @@ Expected: `Governor check: PASS` and `SELF DOGFOOD OK`.
 
    ```bash
    python -m governor run start \
-     --task "Dogfood v1.0.0-rc1 release" \
+     --task "Dogfood v1.0.0 release" \
      --policy agentic-tooling \
      --use-default-profiles \
      --approve \
@@ -62,7 +62,9 @@ Expected: `Governor check: PASS` and `SELF DOGFOOD OK`.
    python -m governor run resume --run-id <run-id> --approve --repo-path .
    ```
 
-   For a **single-shot** smoke path without checkpoints, use `--policy default`.
+   For a **single-shot** smoke path without checkpoints, use `--policy default` or `--policy docs`.
+
+   **Gate profile `fast` on this repo:** ensure `pytest` is on `PATH` (e.g. `export PATH="$(pwd)/.venv/bin:$PATH"`). If `08_gate_results.json` shows `overall: WARN` only because optional checks (`ruff`, `mypy`) were skipped, either pass `--continue-on-gate-warn` on `run start` / `run resume`, or accept the WARN and continue manually (do not re-run `gate` from state `GATES_RUN` — resume validator/report instead).
 
 3. **Inspect artifacts** under `.governor/runs/<run-id>/`:
 

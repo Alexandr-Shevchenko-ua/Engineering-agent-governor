@@ -31,7 +31,7 @@ def main() -> int:
     ver = run([sys.executable, "-m", "governor", "version"])
     if ver.returncode != 0:
         errors.append(f"version command failed: {ver.stderr}")
-    elif "1.0.0rc1" not in (ver.stdout or ""):
+    elif "1.0.0" not in (ver.stdout or ""):
         errors.append(f"unexpected version output: {ver.stdout.strip()}")
 
     val = run([sys.executable, "-m", "governor", "project", "validate", "--repo-path", str(ROOT)])

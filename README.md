@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-**v1.0.0-rc1** — local control plane for agent-delegated engineering: auditable runs, gates, plans, evidence, and review packages. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
+**v1.0.0** — local control plane for agent-delegated engineering: auditable runs, gates, plans, evidence, and review packages. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
 
 ## Not autopilot
 
@@ -84,7 +84,8 @@ python scripts/self_dogfood_release_check.py
 
 CI: `.github/workflows/ci.yml` (Python 3.11 / 3.12, pytest, smokes).
 
-- [docs/RELEASE_NOTES_v1.0.0-rc1.md](docs/RELEASE_NOTES_v1.0.0-rc1.md)
+- [docs/RELEASE_NOTES_v1.0.0.md](docs/RELEASE_NOTES_v1.0.0.md)
+- [docs/RELEASE_NOTES_v1.0.0-rc1.md](docs/RELEASE_NOTES_v1.0.0-rc1.md) (release candidate)
 - [docs/SELF_DOGFOODING.md](docs/SELF_DOGFOODING.md)
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
 - [docs/DOGFOODING.md](docs/DOGFOODING.md)
