@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.2.2** adds run-id validation and restores repo hygiene (`.governor/` is never committed).
+Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.3.0** adds **local runner profiles** (`.governor/config.json`) for bounded `dispatch --profile` without hardcoding Cursor CLI syntax.
 
 ## What this is
 
@@ -15,7 +15,7 @@ Local **delegation-first control plane** for engineering work executed by extern
 - Not a coding agent (does not implement product features)
 - Not autopilot (no automatic agent dispatch or repair loops)
 - No external LLM API calls
-- No built-in Cursor CLI (use `--runner command --command …` with a trusted local CLI)
+- No built-in Cursor CLI (use `--profile` / `--runner command` with your trusted local argv)
 - No background daemons, merge, push, or deploy
 
 ## Quickstart
@@ -59,13 +59,16 @@ gov init --task "My task" --repo-path .
 | `list` | List runs from `.governor/index.json` (`--limit`, `--json`) |
 | `doctor` | Readiness check (does not create `.governor`) |
 | `record` | Store outputs; executor/validator protected unless `--replace` |
-| `dispatch` | Preview or run local runner against role prompt (`--approve` to execute) |
+| `dispatch` | Preview or run local runner (`--runner` or `--profile`; `--approve` to execute) |
+| `config` | Manage local runner profiles (`init`, `show`, `validate`, `path`) |
 | `gate` | Run local checks → `08_gate_results.json` / `.md` |
 | `report` | Generate `09_final_report.md` and `10_lead_update.md` |
 
+**Runner profiles:** [docs/RUNNER_PROFILES.md](docs/RUNNER_PROFILES.md) — `config init` then `dispatch --profile echo-test`.
+
 **Dogfooding:** [docs/DOGFOODING.md](docs/DOGFOODING.md) — using Governor on this repo.
 
-**Smoke tests:** `python scripts/smoke_governor_workflow.py` · `python scripts/smoke_dispatch_workflow.py`
+**Smoke tests:** `python scripts/smoke_governor_workflow.py` · `python scripts/smoke_dispatch_workflow.py` · `python scripts/smoke_profile_workflow.py`
 
 ## Dispatch is not autopilot
 
@@ -73,7 +76,8 @@ gov init --task "My task" --repo-path .
 - **`--approve` required** to execute a local process; no background jobs.
 - **State preconditions** — executor before validator; gate only after executor output; invalid transitions fail before any write.
 - **Non-zero exit (default)** — writes `05_executor_output.failed.md` / `06_validator_output.failed.md` only; **does not** advance workflow state. Use `--accept-failed-output` to record canonical output anyway.
-- **Runners:** `echo` (safe test), `command` (explicit argv, prompt on stdin), `cursor` (placeholder — configure via `--runner command`).
+- **Runners:** `echo` (safe test), `command` (explicit argv, prompt on stdin), `cursor` (placeholder).
+- **Profiles (v0.3):** named runners in `.governor/config.json` — `dispatch --profile echo-test` (mutually exclusive with `--runner`).
 - **Trusted runners only** — dispatch executes local commands in the target repo; no `shell=True`.
 - **No** automatic repair, merge, push, or deploy.
 - Same overwrite rules as `record` (`--replace` to supersede executor/validator artifacts).

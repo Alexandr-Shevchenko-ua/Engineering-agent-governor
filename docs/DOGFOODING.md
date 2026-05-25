@@ -49,7 +49,22 @@ Inspect artifacts under `.governor/runs/<run-id>/` before merging. That director
 
 Optional: `doctor` before starting; `list` / `status` anytime.
 
-## Bounded dispatch (v0.2)
+## Runner profiles (v0.3)
+
+Local config only (gitignored): `.governor/config.json`. See [RUNNER_PROFILES.md](RUNNER_PROFILES.md).
+
+```bash
+python -m governor config init --repo-path .
+python -m governor config validate --repo-path .
+python -m governor config show --repo-path .
+
+python -m governor dispatch --run-id "$RUN_ID" --role executor --profile echo-test --repo-path .
+python -m governor dispatch --run-id "$RUN_ID" --role executor --profile echo-test --approve --repo-path .
+```
+
+`--profile` and `--runner` cannot be used together. Fill `cursor-local` argv locally before enabling — Governor does not ship Cursor CLI syntax.
+
+## Bounded dispatch (v0.2+)
 
 Dispatch is optional — manual `record` still works.
 
@@ -128,4 +143,5 @@ Gate-only outcomes (`GATES_PASS_NO_VALIDATOR`, etc.) are **not** validator sign-
 python -m governor doctor --repo-path .
 python scripts/smoke_governor_workflow.py
 python scripts/smoke_dispatch_workflow.py
+python scripts/smoke_profile_workflow.py
 ```

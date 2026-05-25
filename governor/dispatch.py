@@ -65,6 +65,8 @@ class DispatchPreview:
     timeout: int
     mode: str  # preview | execute
     warnings: list[str] = field(default_factory=list)
+    profile_name: str | None = None
+    config_path: Path | None = None
 
 
 @dataclass
@@ -130,13 +132,18 @@ def build_runner_spec(
     raise ValueError(f"Unknown runner: {runner}. Use echo, command, or cursor.")
 
 
-def _check_command_safety(argv: list[str]) -> None:
+def check_command_argv(argv: list[str]) -> None:
+    """Reject destructive argv patterns (shared with config validation)."""
     joined = " ".join(argv).lower()
     for frag in _BLOCKED_ARG_FRAGMENTS:
         if frag.lower() in joined:
             raise ValueError(
                 f"Refusing potentially destructive command (matched '{frag}'): {argv!r}"
             )
+
+
+def _check_command_safety(argv: list[str]) -> None:
+    check_command_argv(argv)
 
 
 def format_argv_display(argv: list[str]) -> str:
@@ -312,6 +319,8 @@ def build_preview(
     timeout: int,
     *,
     replace: bool,
+    profile_name: str | None = None,
+    config_path: Path | None = None,
 ) -> DispatchPreview:
     run_dir, meta = store.get_run(run_id)
     validate_role(role)
@@ -327,6 +336,8 @@ def build_preview(
         timeout=timeout,
         mode="preview",
         warnings=warnings,
+        profile_name=profile_name,
+        config_path=config_path,
     )
 
 
@@ -339,13 +350,17 @@ def dispatch_command_line(
     command_args: list[str] | None,
     repo_path: str,
     accept_failed_output: bool = False,
+    profile: str | None = None,
 ) -> str:
     parts = [
         "python -m governor dispatch",
         f"--run-id {run_id}",
         f"--role {role}",
-        f"--runner {runner}",
     ]
+    if profile:
+        parts.append(f"--profile {profile}")
+    else:
+        parts.append(f"--runner {runner}")
     if command_args:
         parts.append("--command " + format_argv_display(command_args))
     if approve:
@@ -364,11 +379,24 @@ def preview_dispatch(
     timeout: int,
     *,
     replace: bool,
+    profile_name: str | None = None,
+    config_path: Path | None = None,
 ) -> DispatchPreview:
-    preview = build_preview(store, run_id, role, spec, timeout, replace=replace)
+    preview = build_preview(
+        store,
+        run_id,
+        role,
+        spec,
+        timeout,
+        replace=replace,
+        profile_name=profile_name,
+        config_path=config_path,
+    )
     run_dir, meta = store.get_run(run_id)
     trace = TraceLogger(run_dir, meta.run_id)
     reason = f"runner={spec.name} timeout={timeout}s"
+    if profile_name:
+        reason = f"profile={profile_name} " + reason
     if preview.warnings:
         reason += "; " + "; ".join(preview.warnings)
     trace.append(
@@ -393,6 +421,7 @@ def execute_dispatch(
     replace: bool,
     repo_path: str,
     accept_failed_output: bool = False,
+    profile_name: str | None = None,
 ) -> tuple[Path, DispatchResult]:
     run_dir, meta = store.get_run(run_id)
     validate_role(role)
@@ -424,6 +453,7 @@ def execute_dispatch(
         command_args=spec.argv if spec.name == "command" else None,
         repo_path=repo_path,
         accept_failed_output=accept_failed_output,
+        profile=profile_name,
     )
 
     trace = TraceLogger(run_dir, meta.run_id)
@@ -432,6 +462,8 @@ def execute_dispatch(
         f"runner={spec.name} exit={result.exit_code} "
         f"duration={result.duration_seconds:.2f}s"
     )
+    if profile_name:
+        trace_reason = f"profile={profile_name} " + trace_reason
 
     if result.exit_code != 0 and not accept_failed_output:
         failed_path = store.write_failed_dispatch_artifact(run_dir, role, markdown)

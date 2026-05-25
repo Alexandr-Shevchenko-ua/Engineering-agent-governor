@@ -6,7 +6,7 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 
 - [ ] Bump `governor/__init__.py` `__version__`
 - [ ] Bump `pyproject.toml` `version`
-- [ ] README mentions correct version (v0.1.x)
+- [ ] README mentions correct version (e.g. v0.3.0)
 
 ## Tests and smoke
 
@@ -14,6 +14,9 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 - [ ] `python -m governor --version` — expected version
 - [ ] `python scripts/smoke_governor_workflow.py` — SMOKE OK
 - [ ] `python scripts/smoke_dispatch_workflow.py` — DISPATCH SMOKE OK
+- [ ] `python scripts/smoke_profile_workflow.py` — PROFILE SMOKE OK
+- [ ] `python -m governor config validate --repo-path .` — OK (after `config init`)
+- [ ] `git check-ignore -v .governor/config.json` — ignored
 - [ ] Dispatch preview without `--approve` does not write executor/validator artifacts
 - [ ] Invalid validator-before-executor dispatch does not create `06_validator_output.md`
 - [ ] Non-zero dispatch writes `.failed.md` and leaves state unchanged (unless `--accept-failed-output`)
@@ -28,7 +31,7 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 ## Docs
 
 - [ ] README updated for new commands/behavior
-- [ ] `docs/DOGFOODING.md` current
+- [ ] `docs/DOGFOODING.md` and `docs/RUNNER_PROFILES.md` current
 - [ ] This checklist reviewed
 
 ## Git

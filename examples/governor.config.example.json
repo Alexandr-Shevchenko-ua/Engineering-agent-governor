@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "profiles": {
+    "echo-test": {
+      "runner": "echo",
+      "description": "Safe builtin echo runner for preview/execute smoke tests",
+      "timeout": 300,
+      "enabled": true
+    },
+    "fake-validator": {
+      "runner": "command",
+      "description": "Local fake validator (scripts/fake_agent.py) — adjust path for your repo",
+      "argv": ["python", "scripts/fake_agent.py"],
+      "timeout": 300,
+      "enabled": true
+    },
+    "cursor-local": {
+      "runner": "command",
+      "description": "User-configured local CLI. Fill argv with your trusted command; Governor does not ship Cursor CLI syntax.",
+      "argv": [],
+      "timeout": 900,
+      "enabled": false
+    },
+    "claude-local": {
+      "runner": "command",
+      "description": "User-configured local CLI. Fill argv locally; never put secrets in argv.",
+      "argv": [],
+      "timeout": 900,
+      "enabled": false
+    }
+  }
+}
