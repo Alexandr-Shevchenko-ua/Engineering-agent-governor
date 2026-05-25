@@ -21,6 +21,7 @@ from governor.models import (
     can_transition,
     record_action_for_role,
 )
+from governor.policy import get_policy, resolve_policy_name
 from governor.repair import prepare_repair
 from governor.run_store import RunStore
 from governor.trace import TraceLogger
@@ -564,6 +565,43 @@ def build_default_plan(
     )
 
 
+def _merge_policy_checkpoints(
+    policy_checkpoints: list[tuple[str, str]],
+    cli_checkpoints: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    merged = list(policy_checkpoints)
+    seen = {a for a, _ in merged}
+    for after, msg in cli_checkpoints:
+        if after not in seen:
+            merged.append((after, msg))
+            seen.add(after)
+    return merged
+
+
+def resolve_plan_policy_options(
+    meta,
+    *,
+    policy_name: str | None = None,
+    auto_repair_prepare_on_fail: bool | None = None,
+    checkpoints: list[tuple[str, str]] | None = None,
+) -> tuple[str, bool, list[tuple[str, str]], object]:
+    """Return (policy_name, auto_repair, checkpoints, PolicyPack)."""
+    pol = resolve_policy_name(policy_name or getattr(meta, "policy", None))
+    pack = get_policy(pol)
+    auto = (
+        auto_repair_prepare_on_fail
+        if auto_repair_prepare_on_fail is not None
+        else pack.plan_defaults.auto_repair_prepare_on_fail
+    )
+    policy_cps = list(pack.plan_defaults.checkpoints) or list(pack.default_checkpoints)
+    cli_cps = checkpoints or []
+    if cli_cps:
+        cps = _merge_policy_checkpoints(policy_cps, cli_cps)
+    else:
+        cps = policy_cps
+    return pol, auto, cps, pack
+
+
 def create_plan(
     store: RunStore,
     run_id: str,
@@ -574,16 +612,24 @@ def create_plan(
     validator_profile: str | None = None,
     validator_runner: str | None = None,
     validator_command: list[str] | None = None,
-    auto_repair_prepare_on_fail: bool = False,
+    auto_repair_prepare_on_fail: bool | None = None,
     force: bool = False,
     dry_run: bool = False,
     checkpoints: list[tuple[str, str]] | None = None,
+    policy_name: str | None = None,
 ) -> RunPlan:
     run_dir, meta = store.get_run(run_id)
     if plan_json_path(run_dir).exists() and not force:
         raise FileExistsError(
             f"Plan already exists at {plan_json_path(run_dir)}. Use --force to overwrite."
         )
+
+    pol, effective_auto, effective_cps, pack = resolve_plan_policy_options(
+        meta,
+        policy_name=policy_name,
+        auto_repair_prepare_on_fail=auto_repair_prepare_on_fail,
+        checkpoints=checkpoints,
+    )
 
     plan = build_default_plan(
         store,
@@ -594,8 +640,8 @@ def create_plan(
         validator_profile=validator_profile,
         validator_runner=validator_runner,
         validator_command=validator_command,
-        auto_repair_prepare_on_fail=auto_repair_prepare_on_fail,
-        checkpoints=checkpoints,
+        auto_repair_prepare_on_fail=effective_auto,
+        checkpoints=effective_cps or None,
     )
 
     if dry_run:
@@ -609,12 +655,20 @@ def create_plan(
         action="plan_create",
         output_ref=PLAN_JSON,
         status="ok",
-        reason=f"steps={len(plan.steps)} auto_repair={auto_repair_prepare_on_fail}",
+        reason=(
+            f"steps={len(plan.steps)} policy={pol} auto_repair={effective_auto} "
+            f"checkpoints={len(effective_cps)}"
+        ),
     )
-    store.append_command(
-        run_id,
-        f"python -m governor plan create --run-id {run_id}",
-    )
+    cmd = f"python -m governor plan create --run-id {run_id}"
+    if policy_name or meta.policy:
+        cmd += f" --policy {pol}"
+    store.append_command(run_id, cmd)
+    if pack.plan_defaults.recommend_evidence_export:
+        store.append_command(
+            run_id,
+            f"# Recommended after closure: python -m governor evidence export --run-id {run_id}",
+        )
     return plan
 
 

@@ -137,9 +137,13 @@ class RunMetadata:
     repair_prompt_count: int = 0
     commands_executed: list[str] = field(default_factory=list)
     outcome: str | None = None
+    policy: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        if d.get("policy") is None:
+            d.pop("policy", None)
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunMetadata:
@@ -154,4 +158,5 @@ class RunMetadata:
             repair_prompt_count=data.get("repair_prompt_count", 0),
             commands_executed=list(data.get("commands_executed", [])),
             outcome=data.get("outcome"),
+            policy=data.get("policy"),
         )

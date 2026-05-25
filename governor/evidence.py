@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from governor.models import RunState
+from governor.policy import assess_policy_compliance, get_policy, resolve_policy_name
 from governor.repair_artifacts import list_repair_artifacts
 from governor.run_plan import (
     PLAN_JSON,
@@ -104,6 +105,15 @@ def build_evidence_bundle(
             if block:
                 checkpoints.append({"raw_section": block[:500]})
 
+    pol_name = resolve_policy_name(getattr(meta, "policy", None))
+    policy_pack = get_policy(pol_name)
+    compliance = assess_policy_compliance(
+        run_dir,
+        policy_pack,
+        gate_overall=gate.get("overall") if isinstance(gate, dict) else None,
+        validator_verdict=verdict,
+    )
+
     bundle: dict[str, Any] = {
         "version": 1,
         "exported_at": utc_now_iso(),
@@ -115,6 +125,10 @@ def build_evidence_bundle(
         "repair_count": meta.repair_count,
         "repair_prompt_count": getattr(meta, "repair_prompt_count", 0),
         "repair_history": list_repair_artifacts(run_dir),
+        "policy": pol_name,
+        "policy_description": policy_pack.description,
+        "policy_expectations": list(policy_pack.evidence_expectations),
+        "policy_compliance": compliance,
         "plan": plan_summary,
         "commands_executed": list(meta.commands_executed),
         "gate": gate,
@@ -163,15 +177,27 @@ def render_evidence_markdown(bundle: dict[str, Any]) -> str:
         f"**Task:** {bundle['task']}",
         f"**State:** {bundle['state']}",
         f"**Outcome:** {bundle.get('outcome') or '(pending)'}",
+        f"**Policy:** `{bundle.get('policy', 'default')}`",
         f"**Exported:** {bundle['exported_at']}",
         "",
-        "## Recommendation",
-        "",
-        bundle["recommendation"],
-        "",
-        "## Gate summary",
+        "## Policy compliance",
         "",
     ]
+    pc = bundle.get("policy_compliance") or {}
+    lines.append(f"- Overall: **{pc.get('overall', 'n/a')}**")
+    for f in pc.get("findings") or []:
+        lines.append(f"  - {f}")
+    lines.extend(
+        [
+            "",
+            "## Recommendation",
+            "",
+            bundle["recommendation"],
+            "",
+            "## Gate summary",
+            "",
+        ]
+    )
     gate = bundle.get("gate") or {}
     lines.append(f"- Overall: **{gate.get('overall', 'n/a')}**")
     if gate.get("results"):

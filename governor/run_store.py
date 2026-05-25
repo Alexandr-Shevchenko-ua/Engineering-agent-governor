@@ -21,6 +21,7 @@ from governor.repair_artifacts import (
     repair_output_name,
 )
 from governor.redaction import redact
+from governor.policy import build_init_artifacts, get_policy, resolve_policy_name
 from governor.templates import (
     executor_prompt,
     risk_register,
@@ -63,12 +64,20 @@ class RunStore:
         )
         upsert_entry(self.repo_path, meta, run_dir)
 
-    def create_run(self, task: str) -> tuple[Path, RunMetadata]:
+    def create_run(
+        self,
+        task: str,
+        *,
+        policy_name: str | None = None,
+    ) -> tuple[Path, RunMetadata]:
         runs_dir(self.repo_path).mkdir(parents=True, exist_ok=True)
         slug = slugify(task)
         run_id = f"{utc_run_timestamp()}_{slug}"
         run_dir = runs_dir(self.repo_path) / run_id
         run_dir.mkdir(parents=True, exist_ok=False)
+
+        resolved_policy = resolve_policy_name(policy_name)
+        policy = get_policy(resolved_policy)
 
         now = utc_now_iso()
         meta = RunMetadata(
@@ -78,15 +87,20 @@ class RunStore:
             state=RunState.INTAKE_CREATED.value,
             created_at=now,
             updated_at=now,
+            policy=resolved_policy,
         )
 
-        artifacts = {
-            "00_task_intake.md": task_intake(task, str(self.repo_path), run_id),
-            "01_scope_and_assumptions.md": scope_and_assumptions(task),
-            "02_risk_register.md": risk_register(),
-            "03_executor_prompt.md": executor_prompt(task, str(self.repo_path), run_id),
-            "04_validator_prompt.md": validator_prompt(task, str(self.repo_path), run_id),
-        }
+        repo_str = str(self.repo_path)
+        if resolved_policy == "default":
+            artifacts = {
+                "00_task_intake.md": task_intake(task, repo_str, run_id),
+                "01_scope_and_assumptions.md": scope_and_assumptions(task),
+                "02_risk_register.md": risk_register(),
+                "03_executor_prompt.md": executor_prompt(task, repo_str, run_id),
+                "04_validator_prompt.md": validator_prompt(task, repo_str, run_id),
+            }
+        else:
+            artifacts = build_init_artifacts(policy, task, repo_str, run_id)
         for name, content in artifacts.items():
             (run_dir / name).write_text(content, encoding="utf-8")
 
@@ -97,13 +111,12 @@ class RunStore:
             actor="governor",
             action="init",
             output_ref=str(run_dir),
-            reason=f"Created run for task: {task}",
+            reason=f"Created run for task: {task} (policy={resolved_policy})",
         )
 
         meta.state = require_transition(RunState.INTAKE_CREATED, "init").value
-        meta.commands_executed.append(
-            f"python -m governor init --task {task!r} --repo-path {self.repo_path}"
-        )
+        cmd = f"python -m governor init --task {task!r} --policy {resolved_policy} --repo-path {self.repo_path}"
+        meta.commands_executed.append(cmd)
         self.save_metadata(run_dir, meta)
         return run_dir, meta
 

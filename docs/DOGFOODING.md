@@ -49,7 +49,16 @@ Inspect artifacts under `.governor/runs/<run-id>/` before merging. That director
 
 Optional: `doctor` before starting; `list` / `status` anytime.
 
-## Run plans (v0.6)
+## Policy packs (v0.7)
+
+```bash
+python -m governor policy list
+python -m governor init --task "Fix X" --policy bugfix --repo-path .
+```
+
+See [POLICY_PACKS.md](POLICY_PACKS.md).
+
+## Run plans (v0.6+)
 
 See [RUN_PLANS.md](RUN_PLANS.md). Bounded orchestration — **not** autopilot.
 

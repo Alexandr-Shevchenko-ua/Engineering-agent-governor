@@ -1,4 +1,4 @@
-# Run plans (v0.6)
+# Run plans (v0.7)
 
 A **run plan** is a local, explicit workflow artifact for a governor run. It is **not autopilot**: no background jobs, no dynamic agent creation, no infinite loops, and **no automatic repair dispatch**.
 
@@ -44,7 +44,8 @@ python -m governor plan execute --run-id "$RUN_ID" --approve --repo-path .
 
 - `--executor-profile` / `--validator-profile` — preferred (validated via `config.json`)
 - `--executor-runner` / `--validator-runner` + `--executor-command` / `--validator-command`
-- `--auto-repair-prepare-on-fail`
+- `--auto-repair-prepare-on-fail` (overrides policy default)
+- `--policy NAME` — plan defaults from policy (default: run metadata policy)
 - `--force` — overwrite existing plan
 - `--dry-run` — print plan only
 
@@ -130,5 +131,6 @@ Checks schema, unique step IDs, actions, profiles, secret argv, statuses. Exit 0
 
 - [RUNNER_PROFILES.md](RUNNER_PROFILES.md) — profile configuration
 - [REPAIR_WORKFLOW.md](REPAIR_WORKFLOW.md) — manual repair (not auto-dispatched by plans)
+- [POLICY_PACKS.md](POLICY_PACKS.md) — task templates and plan defaults
 - [EVIDENCE_BUNDLES.md](EVIDENCE_BUNDLES.md) — MR/lead review export
 - [DOGFOODING.md](DOGFOODING.md) — full manual loop

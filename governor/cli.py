@@ -32,6 +32,7 @@ from governor.models import NEXT_ACTIONS, RunState
 from governor.repair import list_repair_artifacts, prepare_repair
 from governor.report import generate_reports
 from governor.evidence import EVIDENCE_JSON, EVIDENCE_MD, evidence_json_path, export_evidence
+from governor.policy import get_policy, list_policies, validate_policy_pack
 from governor.run_plan import (
     APPROVE_REQUIRED_MSG,
     PLAN_JSON,
@@ -79,6 +80,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_init = sub.add_parser("init", help="Create a new governor run", parents=[parent])
     p_init.add_argument("--task", required=True, help="Task title / objective")
+    p_init.add_argument(
+        "--policy",
+        default=None,
+        metavar="NAME",
+        help="Policy pack: default, bugfix, refactor, docs, test-only, release, agentic-tooling",
+    )
 
     p_status = sub.add_parser("status", help="Show run status", parents=[parent])
     p_status.add_argument("--run-id", default=None, help="Run ID (default: latest)")
@@ -287,6 +294,25 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="STEP_ID",
         help="Insert human_checkpoint after this step (e.g. gate, validator)",
     )
+    p_plan_create.add_argument(
+        "--policy",
+        default=None,
+        metavar="NAME",
+        help="Policy for plan defaults (default: from run metadata or 'default')",
+    )
+
+    p_policy = sub.add_parser(
+        "policy",
+        help="Built-in policy packs (no .governor required)",
+    )
+    policy_sub = p_policy.add_subparsers(dest="policy_cmd", required=True)
+    p_pol_list = policy_sub.add_parser("list", help="List built-in policies")
+    p_pol_list.add_argument("--json", action="store_true", dest="as_json")
+    p_pol_show = policy_sub.add_parser("show", help="Show policy details")
+    p_pol_show.add_argument("--policy", required=True, metavar="NAME")
+    p_pol_show.add_argument("--json", action="store_true", dest="as_json")
+    p_pol_validate = policy_sub.add_parser("validate", help="Validate policy pack definition")
+    p_pol_validate.add_argument("--policy", required=True, metavar="NAME")
 
     p_plan_show = plan_sub.add_parser("show", help="Show plan steps", parents=[parent])
     p_plan_show.add_argument("--run-id", required=True)
@@ -412,14 +438,22 @@ def _status_payload(store: RunStore, run_dir: Path, meta) -> dict:
         "folder": str(run_dir),
         "created_at": meta.created_at,
         "updated_at": meta.updated_at,
+        "policy": getattr(meta, "policy", None) or "default",
     }
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    store = init_store(_repo_path_from_args(args))
-    run_dir, meta = store.create_run(args.task)
+    try:
+        if args.policy:
+            get_policy(args.policy)
+        store = init_store(_repo_path_from_args(args))
+        run_dir, meta = store.create_run(args.task, policy_name=args.policy)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
     print(f"Created run: {meta.run_id}")
     print(f"Folder: {run_dir}")
+    print(f"Policy: {meta.policy or 'default'}")
     print(f"State: {meta.state}")
     print(f"Next: {NEXT_ACTIONS.get(RunState(meta.state), '')}")
     return 0
@@ -445,6 +479,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Updated:    {meta.updated_at}")
     print(f"Folder:     {run_dir}")
     print(f"Outcome:    {meta.outcome or '(pending)'}")
+    print(f"Policy:     {getattr(meta, 'policy', None) or 'default'}")
     print(f"Repair:     count={meta.repair_count} prompts={getattr(meta, 'repair_prompt_count', 0)}")
     print(f"Artifacts:  {', '.join(artifacts)}")
     if plan_json_path(run_dir).is_file():
@@ -777,10 +812,63 @@ def cmd_config_validate(args: argparse.Namespace) -> int:
     return 1 if has_fail else 0
 
 
+def cmd_policy_list(args: argparse.Namespace) -> int:
+    names = list_policies()
+    if args.as_json:
+        print(json.dumps([{"name": n} for n in names], indent=2))
+        return 0
+    print("Built-in policies:")
+    for n in names:
+        pack = get_policy(n)
+        print(f"  - {n}: {pack.description}")
+    return 0
+
+
+def cmd_policy_show(args: argparse.Namespace) -> int:
+    try:
+        pack = get_policy(args.policy)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(pack.to_dict(), indent=2, ensure_ascii=False))
+        return 0
+    print(f"Policy: {pack.name}")
+    print(f"Description: {pack.description}")
+    print(f"Required artifacts: {', '.join(pack.required_artifacts) or '(none)'}")
+    print(f"Recommended gates: {', '.join(pack.recommended_gates)}")
+    print(f"Max repair prompts: {pack.max_repair_prompts}")
+    if pack.default_checkpoints:
+        print("Default checkpoints:")
+        for after, msg in pack.default_checkpoints:
+            print(f"  - after {after}: {msg}")
+    pd = pack.plan_defaults
+    print(f"Plan defaults: auto_repair={pd.auto_repair_prepare_on_fail} max_steps={pd.max_steps}")
+    if pack.evidence_expectations:
+        print("Evidence expectations:")
+        for e in pack.evidence_expectations:
+            print(f"  - {e}")
+    return 0
+
+
+def cmd_policy_validate(args: argparse.Namespace) -> int:
+    try:
+        pack = get_policy(args.policy)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    lines = validate_policy_pack(pack)
+    has_fail = any(level == "FAIL" for level, _ in lines)
+    for level, msg in lines:
+        print(f"{level}: {msg}")
+    return 1 if has_fail else 0
+
+
 def cmd_plan_create(args: argparse.Namespace) -> int:
     try:
         store = open_store(_repo_path_from_args(args))
         checkpoints = _parse_checkpoints(args.checkpoint, args.checkpoint_after)
+        auto_repair = True if args.auto_repair_prepare_on_fail else None
         plan = create_plan(
             store,
             args.run_id,
@@ -790,10 +878,11 @@ def cmd_plan_create(args: argparse.Namespace) -> int:
             validator_profile=args.validator_profile,
             validator_runner=args.validator_runner,
             validator_command=args.validator_command,
-            auto_repair_prepare_on_fail=args.auto_repair_prepare_on_fail,
+            auto_repair_prepare_on_fail=auto_repair,
             force=args.force,
             dry_run=args.dry_run,
             checkpoints=checkpoints or None,
+            policy_name=args.policy,
         )
         if args.dry_run:
             print(render_plan_markdown(plan))
@@ -979,6 +1068,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "evidence":
         if args.evidence_cmd == "export":
             return cmd_evidence_export(args)
+    if args.command == "policy":
+        policy_handlers = {
+            "list": cmd_policy_list,
+            "show": cmd_policy_show,
+            "validate": cmd_policy_validate,
+        }
+        return policy_handlers[args.policy_cmd](args)
     return handlers[args.command](args)
 
 

@@ -12,6 +12,7 @@ from governor.repair_artifacts import (
     list_repair_prompts,
 )
 from governor.evidence import EVIDENCE_JSON, EVIDENCE_MD, evidence_json_path
+from governor.policy import get_policy, resolve_policy_name
 from governor.run_plan import load_plan, plan_json_path, plan_status_summary
 from governor.run_store import RunStore
 from governor.verdict import parse_validator_verdict
@@ -181,12 +182,20 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
         human_decision=human_decision,
     )
 
+    pol_name = resolve_policy_name(getattr(meta, "policy", None))
+    try:
+        policy_pack = get_policy(pol_name)
+        policy_desc = policy_pack.description
+    except ValueError:
+        policy_desc = "(unknown policy)"
+
     report_lines = [
         "# Final report",
         "",
         f"**Outcome:** {outcome}",
         f"**Run ID:** `{meta.run_id}`",
         f"**Task:** {meta.task}",
+        f"**Policy:** `{pol_name}` — {policy_desc}",
         f"**State:** {meta.state}",
         f"**Repo:** `{meta.repo_path}`",
         "",

@@ -1,4 +1,4 @@
-# Evidence bundles (v0.6.0)
+# Evidence bundles (v0.7.0)
 
 An **evidence bundle** is the lead/MR-review artifact for a governor run: one markdown file for humans and one JSON file for tooling.
 
@@ -19,7 +19,8 @@ Trace event: `evidence_export`.
 
 ## What is included
 
-- Run metadata (task, state, outcome, repair counts)
+- Run metadata (task, state, outcome, repair counts, **policy**)
+- **Policy compliance** summary (PASS/WARN/FAIL heuristic vs policy expectations)
 - Plan summary (if `12_run_plan.json` exists)
 - Gate summary from `08_gate_results.json`
 - Validator verdict and short output excerpt
