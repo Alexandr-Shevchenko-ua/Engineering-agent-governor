@@ -1,4 +1,8 @@
-# Governor runtime (never commit) lets leave it as is for now
+# Governor runtime (never commit)
+.governor/
+
+# Agent workflow state (local)
+.claude/
 
 # Virtual environments
 .venv/
