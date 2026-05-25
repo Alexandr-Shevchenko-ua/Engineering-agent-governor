@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from governor.evidence import EVIDENCE_JSON, EVIDENCE_MD, export_evidence
 from governor.models import RunState
-from governor.policy import get_policy, resolve_policy_name
+from governor.policy import get_policy
 from governor.preflight import run_execution_preflight
+from governor.project_config import resolve_policy_for_repo
+from governor.review_package import (
+    PR_BODY_MD,
+    REVIEW_MD,
+    maybe_export_review_package,
+    review_json_path,
+)
 from governor.run_plan import (
     create_plan,
     execute_plan,
@@ -25,7 +33,8 @@ from governor.run_store import RunStore, init_store
 class GovernedRunOptions:
     task: str
     repo_path: str = "."
-    policy: str = "default"
+    policy: str | None = None
+    gate_profile: str | None = None
     executor_profile: str | None = None
     validator_profile: str | None = None
     executor_runner: str | None = None
@@ -35,6 +44,7 @@ class GovernedRunOptions:
     auto_repair_prepare_on_fail: bool | None = None
     checkpoints: list[tuple[str, str]] | None = None
     with_evidence: bool = False
+    with_review_package: bool = False
     approve: bool = False
     dry_run: bool = False
     continue_on_gate_warn: bool = False
@@ -48,7 +58,7 @@ class GovernedRunOptions:
 @dataclass
 class GovernedRunResult:
     run_id: str | None = None
-    policy: str = "default"
+    policy: str | None = None
     state: str | None = None
     outcome: str | None = None
     plan_overall_status: str | None = None
@@ -57,6 +67,8 @@ class GovernedRunResult:
     exit_code: int = 0
     evidence_exported: bool = False
     evidence_skipped_reason: str | None = None
+    review_package_exported: bool = False
+    review_skipped_reason: str | None = None
     preflight_messages: list[str] = field(default_factory=list)
     dry_run_actions: list[str] = field(default_factory=list)
     run_dir: Path | None = None
@@ -92,7 +104,7 @@ def uses_config_profiles(opts: GovernedRunOptions) -> bool:
 
 
 def _dry_run_plan(opts: GovernedRunOptions) -> list[str]:
-    pol = resolve_policy_name(opts.policy)
+    pol = resolve_policy_for_repo(Path(opts.repo_path), opts.policy)
     pack = get_policy(pol)
     ex_prof = opts.executor_profile or ("echo-test" if opts.use_default_profiles else "?")
     val_prof = opts.validator_profile or ("fake-validator" if opts.use_default_profiles else "?")
@@ -109,6 +121,8 @@ def _dry_run_plan(opts: GovernedRunOptions) -> list[str]:
         actions.append("Would execute plan (--approve)")
         if opts.with_evidence:
             actions.append("Would export evidence if FINAL_REPORT_READY")
+        if opts.with_review_package:
+            actions.append("Would export review package if FINAL_REPORT_READY")
     else:
         actions.append("Would NOT execute (missing --approve)")
     return actions
@@ -238,6 +252,8 @@ def build_run_summary_payload(
     plan_overall_status: str | None = None,
     evidence_exported: bool = False,
     evidence_skipped_reason: str | None = None,
+    review_package_exported: bool = False,
+    review_skipped_reason: str | None = None,
 ) -> dict[str, Any]:
     run_dir, meta = store.get_run(run_id)
     plan_status = plan_overall_status
@@ -267,7 +283,29 @@ def build_run_summary_payload(
         "evidence_json": str(run_dir / EVIDENCE_JSON)
         if (run_dir / EVIDENCE_JSON).is_file()
         else None,
+        "review_package_md": str(run_dir / REVIEW_MD)
+        if (run_dir / REVIEW_MD).is_file()
+        else None,
+        "review_package_json": str(review_json_path(run_dir))
+        if review_json_path(run_dir).is_file()
+        else None,
+        "pr_body": str(run_dir / PR_BODY_MD) if (run_dir / PR_BODY_MD).is_file() else None,
     }
+
+    gate_profile: str | None = None
+    if plan_json_path(run_dir).is_file():
+        try:
+            gate_profile = getattr(load_plan(run_dir), "gate_profile", None)
+        except (ValueError, OSError):
+            pass
+    gate_json = run_dir / "08_gate_results.json"
+    if gate_json.is_file():
+        try:
+            gate_profile = gate_profile or json.loads(
+                gate_json.read_text(encoding="utf-8")
+            ).get("gate_profile")
+        except (OSError, json.JSONDecodeError):
+            pass
 
     return {
         "run_id": meta.run_id,
@@ -280,6 +318,9 @@ def build_run_summary_payload(
         "artifacts": artifacts,
         "evidence_exported": evidence_exported,
         "evidence_skipped_reason": evidence_skipped_reason,
+        "review_package_exported": review_package_exported,
+        "review_skipped_reason": review_skipped_reason,
+        "gate_profile": gate_profile,
     }
 
 
@@ -306,11 +347,20 @@ def print_run_summary(payload: dict[str, Any], *, preflight_warnings: list[str] 
         print(payload["evidence_skipped_reason"])
     if payload.get("evidence_exported"):
         print("Evidence bundle exported.")
+    if payload.get("review_skipped_reason"):
+        print(payload["review_skipped_reason"])
+    if payload.get("review_package_exported"):
+        print("Review package exported.")
+    if payload.get("gate_profile"):
+        print(f"Gate profile:  {payload['gate_profile']}")
     print(f"Next action:   {payload['next_action']}")
 
 
 def governed_run_start(opts: GovernedRunOptions) -> GovernedRunResult:
-    pol = resolve_policy_name(opts.policy)
+    try:
+        pol = resolve_policy_for_repo(Path(opts.repo_path), opts.policy)
+    except ValueError as e:
+        return GovernedRunResult(error=str(e), exit_code=1, next_action=str(e))
     try:
         get_policy(pol)
     except ValueError as e:
@@ -375,6 +425,7 @@ def governed_run_start(opts: GovernedRunOptions) -> GovernedRunResult:
         auto_repair_prepare_on_fail=opts.auto_repair_prepare_on_fail,
         checkpoints=opts.checkpoints,
         policy_name=pol,
+        gate_profile=opts.gate_profile,
     )
 
     result = GovernedRunResult(
@@ -394,6 +445,10 @@ def governed_run_start(opts: GovernedRunOptions) -> GovernedRunResult:
         if opts.with_evidence:
             result.evidence_skipped_reason = (
                 "Evidence export skipped — plan not executed (pass --approve)."
+            )
+        if opts.with_review_package:
+            result.review_skipped_reason = (
+                "Review package export skipped — plan not executed (pass --approve)."
             )
         result.exit_code = 0
         return result
@@ -419,6 +474,11 @@ def governed_run_start(opts: GovernedRunOptions) -> GovernedRunResult:
     ev_ok, ev_skip = maybe_export_evidence(store, run_id, with_evidence=opts.with_evidence)
     result.evidence_exported = ev_ok
     result.evidence_skipped_reason = ev_skip
+    rev_ok, rev_skip = maybe_export_review_package(
+        store, run_id, with_review_package=opts.with_review_package
+    )
+    result.review_package_exported = rev_ok
+    result.review_skipped_reason = rev_skip
 
     result.next_action = build_next_action(
         store,
@@ -519,6 +579,9 @@ def governed_run_resume(
     _, meta = store.get_run(run_id)
     plan = load_plan(run_dir)
     ev_ok, ev_skip = maybe_export_evidence(store, run_id, with_evidence=opts.with_evidence)
+    rev_ok, rev_skip = maybe_export_review_package(
+        store, run_id, with_review_package=opts.with_review_package
+    )
 
     result = GovernedRunResult(
         run_id=run_id,
@@ -531,6 +594,8 @@ def governed_run_resume(
         preflight_messages=preflight_msgs,
         evidence_exported=ev_ok,
         evidence_skipped_reason=ev_skip,
+        review_package_exported=rev_ok,
+        review_skipped_reason=rev_skip,
     )
     result.next_action = build_next_action(
         store,

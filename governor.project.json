@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "project_name": "Engineering Agent Governor",
+  "default_policy": "agentic-tooling",
+  "allowed_policies": [
+    "default",
+    "bugfix",
+    "refactor",
+    "docs",
+    "test-only",
+    "release",
+    "agentic-tooling"
+  ],
+  "default_gate_profile": "fast",
+  "gate_profiles": {
+    "fast": {
+      "description": "Fast local validation",
+      "commands": [
+        "git_status_short",
+        "git_diff_check",
+        "pytest",
+        "diff_budget",
+        "sensitive_paths"
+      ],
+      "required": [
+        "git_diff_check",
+        "pytest",
+        "sensitive_paths"
+      ],
+      "optional": [
+        "ruff",
+        "mypy",
+        "git_status_short"
+      ]
+    },
+    "release": {
+      "description": "Release validation",
+      "commands": [
+        "git_status_short",
+        "git_diff_check",
+        "pytest",
+        "smoke_all",
+        "diff_budget",
+        "sensitive_paths"
+      ],
+      "required": [
+        "git_diff_check",
+        "pytest",
+        "smoke_all",
+        "sensitive_paths"
+      ],
+      "optional": [
+        "ruff",
+        "mypy"
+      ]
+    }
+  },
+  "diff_budget": {
+    "max_changed_files": 20,
+    "max_lines_added": 1200,
+    "max_lines_deleted": 800
+  },
+  "sensitive_paths": [
+    ".env",
+    ".governor/",
+    "**/*secret*",
+    "**/*token*",
+    "**/*.pem"
+  ],
+  "review_package": {
+    "include_evidence": true,
+    "include_trace_summary": true,
+    "include_commands": true,
+    "include_policy_compliance": true
+  }
+}

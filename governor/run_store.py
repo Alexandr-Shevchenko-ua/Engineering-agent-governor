@@ -21,7 +21,8 @@ from governor.repair_artifacts import (
     repair_output_name,
 )
 from governor.redaction import redact
-from governor.policy import build_init_artifacts, get_policy, resolve_policy_name
+from governor.policy import build_init_artifacts, get_policy
+from governor.project_config import resolve_policy_for_repo
 from governor.templates import (
     executor_prompt,
     risk_register,
@@ -76,7 +77,7 @@ class RunStore:
         run_dir = runs_dir(self.repo_path) / run_id
         run_dir.mkdir(parents=True, exist_ok=False)
 
-        resolved_policy = resolve_policy_name(policy_name)
+        resolved_policy = resolve_policy_for_repo(self.repo_path, policy_name)
         policy = get_policy(resolved_policy)
 
         now = utc_now_iso()

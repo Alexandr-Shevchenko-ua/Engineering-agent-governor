@@ -27,6 +27,22 @@ from governor.dispatch import (
 )
 from governor.doctor import run_doctor
 from governor.gates import run_gates, write_gate_artifacts
+from governor.project_config import (
+    PROJECT_CONFIG_FILENAME,
+    init_project_config,
+    load_project_config,
+    project_config_path,
+    resolve_gate_profile_for_repo,
+    resolve_policy_for_repo,
+    validate_project_data,
+)
+from governor.review_package import (
+    PR_BODY_MD,
+    REVIEW_JSON,
+    REVIEW_MD,
+    export_review_package,
+    review_json_path,
+)
 from governor.index import list_entries
 from governor.models import NEXT_ACTIONS, RunState
 from governor.repair import list_repair_artifacts, prepare_repair
@@ -115,6 +131,52 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_gate = sub.add_parser("gate", help="Run deterministic local gates", parents=[parent])
     p_gate.add_argument("--run-id", required=True)
+    p_gate.add_argument(
+        "--profile",
+        default=None,
+        metavar="NAME",
+        help="Gate profile from governor.project.json (default: project default_gate_profile)",
+    )
+
+    p_project = sub.add_parser(
+        "project",
+        help="Tracked repository governance (governor.project.json)",
+        parents=[parent],
+    )
+    project_sub = p_project.add_subparsers(dest="project_cmd", required=True)
+    p_proj_init = project_sub.add_parser(
+        "init",
+        help="Write governor.project.json if missing",
+        parents=[parent],
+    )
+    p_proj_init.add_argument("--force", action="store_true")
+    p_proj_show = project_sub.add_parser("show", help="Show project config summary", parents=[parent])
+    p_proj_validate = project_sub.add_parser(
+        "validate",
+        help="Validate governor.project.json",
+        parents=[parent],
+    )
+    p_proj_path = project_sub.add_parser("path", help="Print expected config path", parents=[parent])
+
+    p_review = sub.add_parser(
+        "review",
+        help="Review / MR handoff package",
+        parents=[parent],
+    )
+    review_sub = p_review.add_subparsers(dest="review_cmd", required=True)
+    p_rev_export = review_sub.add_parser("export", help="Write 15_review_package.*", parents=[parent])
+    p_rev_export.add_argument("--run-id", required=True)
+    p_rev_export.add_argument(
+        "--format",
+        choices=["both", "markdown", "json"],
+        default="both",
+        help="Output format (default: both md and json; PR body always written)",
+    )
+    p_rev_export.add_argument(
+        "--include-trace",
+        action="store_true",
+        help="Include recent trace events in JSON package",
+    )
 
     p_report = sub.add_parser("report", help="Generate final report and lead update", parents=[parent])
     p_report.add_argument("--run-id", required=True)
@@ -307,6 +369,12 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="Policy for plan defaults (default: from run metadata or 'default')",
     )
+    p_plan_create.add_argument(
+        "--gate-profile",
+        default=None,
+        metavar="NAME",
+        help="Gate profile from governor.project.json",
+    )
 
     p_policy = sub.add_parser(
         "policy",
@@ -414,6 +482,7 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument("--accept-failed-output", action="store_true")
         p.add_argument("--max-steps", type=int, default=10)
         p.add_argument("--with-evidence", action="store_true")
+        p.add_argument("--with-review-package", action="store_true")
         p.add_argument("--strict-preflight", action="store_true")
         p.add_argument("--json", action="store_true", dest="as_json")
 
@@ -423,7 +492,18 @@ def _build_parser() -> argparse.ArgumentParser:
         parents=[parent],
     )
     p_run_start.add_argument("--task", required=True)
-    p_run_start.add_argument("--policy", default="default", metavar="NAME")
+    p_run_start.add_argument(
+        "--policy",
+        default=None,
+        metavar="NAME",
+        help="Policy pack (default: governor.project.json default_policy or 'default')",
+    )
+    p_run_start.add_argument(
+        "--gate-profile",
+        default=None,
+        metavar="NAME",
+        help="Gate profile for plan gate step",
+    )
     p_run_start.add_argument("--executor-profile", default=None)
     p_run_start.add_argument("--validator-profile", default=None)
     p_run_start.add_argument(
@@ -516,6 +596,9 @@ def _status_payload(store: RunStore, run_dir: Path, meta) -> dict:
         "next_action": NEXT_ACTIONS.get(RunState(meta.state), ""),
         "evidence_bundle_exists": evidence_json_path(run_dir).is_file()
         or (run_dir / EVIDENCE_MD).is_file(),
+        "review_package_exists": review_json_path(run_dir).is_file()
+        or (run_dir / REVIEW_MD).is_file(),
+        "pr_body_exists": (run_dir / PR_BODY_MD).is_file(),
         "folder": str(run_dir),
         "created_at": meta.created_at,
         "updated_at": meta.updated_at,
@@ -525,10 +608,11 @@ def _status_payload(store: RunStore, run_dir: Path, meta) -> dict:
 
 def cmd_init(args: argparse.Namespace) -> int:
     try:
-        if args.policy:
-            get_policy(args.policy)
-        store = init_store(_repo_path_from_args(args))
-        run_dir, meta = store.create_run(args.task, policy_name=args.policy)
+        repo = resolve_repo_path(_repo_path_from_args(args))
+        pol = resolve_policy_for_repo(repo, args.policy)
+        get_policy(pol)
+        store = init_store(str(repo))
+        run_dir, meta = store.create_run(args.task, policy_name=pol)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -576,6 +660,8 @@ def cmd_status(args: argparse.Namespace) -> int:
             print("Plan:       present but unreadable")
     ev = evidence_json_path(run_dir).is_file() or (run_dir / EVIDENCE_MD).is_file()
     print(f"Evidence:   {'yes' if ev else 'no'}")
+    rev = review_json_path(run_dir).is_file() or (run_dir / REVIEW_MD).is_file()
+    print(f"Review pkg: {'yes' if rev else 'no'}")
     print(f"Next:       {NEXT_ACTIONS.get(RunState(meta.state), 'See run_state.json')}")
     return 0
 
@@ -618,7 +704,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
         return 1
 
     target_repo = Path(meta.repo_path)
-    report = run_gates(target_repo)
+    profile = resolve_gate_profile_for_repo(target_repo, getattr(args, "profile", None))
+    report = run_gates(target_repo, gate_profile=profile)
     json_p, md_p = write_gate_artifacts(run_dir, report)
 
     meta = store.update_state(args.run_id, "gate")
@@ -635,6 +722,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
     )
 
     print(f"Gates overall: {report.overall}")
+    if report.gate_profile:
+        print(f"Gate profile: {report.gate_profile} (compliance: {report.profile_compliance})")
     print(f"Wrote: {json_p.name}, {md_p.name}")
     print(f"State: {meta.state}")
     print(f"Next: {NEXT_ACTIONS.get(RunState(meta.state), '')}")
@@ -964,6 +1053,7 @@ def cmd_plan_create(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             checkpoints=checkpoints or None,
             policy_name=args.policy,
+            gate_profile=getattr(args, "gate_profile", None),
         )
         if args.dry_run:
             print(render_plan_markdown(plan))
@@ -1100,6 +1190,83 @@ def cmd_evidence_export(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_project_init(args: argparse.Namespace) -> int:
+    try:
+        repo = resolve_repo_path(_repo_path_from_args(args))
+        path = init_project_config(repo, force=args.force)
+        print(f"Wrote: {path}")
+        return 0
+    except FileExistsError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_project_show(args: argparse.Namespace) -> int:
+    try:
+        repo = resolve_repo_path(_repo_path_from_args(args))
+        cfg = load_project_config(repo)
+        print(f"File: {project_config_path(repo)}")
+        print(f"Project: {cfg.project_name}")
+        print(f"Default policy: {cfg.default_policy}")
+        print(f"Allowed policies: {', '.join(cfg.allowed_policies)}")
+        print(f"Default gate profile: {cfg.default_gate_profile}")
+        print(f"Gate profiles: {', '.join(sorted(cfg.gate_profiles))}")
+        print(
+            f"Diff budget: {cfg.diff_budget.max_changed_files} files, "
+            f"+{cfg.diff_budget.max_lines_added}/-{cfg.diff_budget.max_lines_deleted} lines"
+        )
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_project_validate(args: argparse.Namespace) -> int:
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    path = project_config_path(repo)
+    if not path.is_file():
+        print(f"WARN: no {PROJECT_CONFIG_FILENAME} at {path}")
+        return 0
+    data = json.loads(path.read_text(encoding="utf-8"))
+    lines = validate_project_data(data)
+    has_fail = False
+    for ln in lines:
+        print(f"{ln.level}: {ln.message}")
+        if ln.level == "FAIL":
+            has_fail = True
+    return 1 if has_fail else 0
+
+
+def cmd_project_path(args: argparse.Namespace) -> int:
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    print(project_config_path(repo))
+    return 0
+
+
+def cmd_review_export(args: argparse.Namespace) -> int:
+    try:
+        store = open_store(_repo_path_from_args(args))
+        fmt = args.format
+        md_p, json_p, pr_p = export_review_package(
+            store,
+            args.run_id,
+            include_trace=args.include_trace,
+            write_markdown=fmt in ("both", "markdown"),
+            write_json=fmt in ("both", "json"),
+            write_pr_body=True,
+        )
+        if md_p:
+            print(f"Wrote: {md_p.name}")
+        if json_p:
+            print(f"Wrote: {json_p.name}")
+        if pr_p:
+            print(f"Wrote: {pr_p.name}")
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def _governed_opts_from_args(args: argparse.Namespace) -> GovernedRunOptions:
     checkpoints = _parse_checkpoints(
         getattr(args, "checkpoint", []) or [],
@@ -1109,7 +1276,8 @@ def _governed_opts_from_args(args: argparse.Namespace) -> GovernedRunOptions:
     return GovernedRunOptions(
         task=getattr(args, "task", ""),
         repo_path=_repo_path_from_args(args),
-        policy=getattr(args, "policy", "default") or "default",
+        policy=getattr(args, "policy", None),
+        gate_profile=getattr(args, "gate_profile", None),
         executor_profile=getattr(args, "executor_profile", None),
         validator_profile=getattr(args, "validator_profile", None),
         executor_runner=getattr(args, "executor_runner", None),
@@ -1119,6 +1287,7 @@ def _governed_opts_from_args(args: argparse.Namespace) -> GovernedRunOptions:
         auto_repair_prepare_on_fail=auto_repair,
         checkpoints=checkpoints or None,
         with_evidence=getattr(args, "with_evidence", False),
+        with_review_package=getattr(args, "with_review_package", False),
         approve=getattr(args, "approve", False),
         dry_run=getattr(args, "dry_run", False),
         continue_on_gate_warn=getattr(args, "continue_on_gate_warn", False),
@@ -1150,6 +1319,8 @@ def cmd_run_start(args: argparse.Namespace) -> int:
             plan_overall_status=result.plan_overall_status,
             evidence_exported=result.evidence_exported,
             evidence_skipped_reason=result.evidence_skipped_reason,
+            review_package_exported=result.review_package_exported,
+            review_skipped_reason=result.review_skipped_reason,
         )
         if args.as_json:
             payload["preflight_warnings"] = result.preflight_messages
@@ -1200,6 +1371,8 @@ def cmd_run_resume(args: argparse.Namespace) -> int:
         plan_overall_status=result.plan_overall_status,
         evidence_exported=result.evidence_exported,
         evidence_skipped_reason=result.evidence_skipped_reason,
+        review_package_exported=result.review_package_exported,
+        review_skipped_reason=result.review_skipped_reason,
     )
     if args.as_json:
         payload["preflight_warnings"] = result.preflight_messages
@@ -1272,6 +1445,17 @@ def main(argv: list[str] | None = None) -> int:
             "resume": cmd_run_resume,
         }
         return run_handlers[args.run_cmd](args)
+    if args.command == "project":
+        project_handlers = {
+            "init": cmd_project_init,
+            "show": cmd_project_show,
+            "validate": cmd_project_validate,
+            "path": cmd_project_path,
+        }
+        return project_handlers[args.project_cmd](args)
+    if args.command == "review":
+        if args.review_cmd == "export":
+            return cmd_review_export(args)
     return handlers[args.command](args)
 
 

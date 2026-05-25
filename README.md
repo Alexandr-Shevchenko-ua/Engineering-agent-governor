@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.8.0** adds **`governor run start`** — one governed command for init + plan + optional bounded execution — plus policy packs, resume, checkpoints, and evidence export.
+Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.9.0** adds **project governance** (`governor.project.json`), **named gate profiles**, and **review/MR packages**; **v0.8.0** added **`governor run start`**, policy packs, resume, checkpoints, and evidence export.
 
 ## What this is
 

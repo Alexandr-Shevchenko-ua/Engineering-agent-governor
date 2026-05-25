@@ -116,6 +116,7 @@ class RunPlan:
     overall_status: str = "PENDING"
     executor_profile: str | None = None
     validator_profile: str | None = None
+    gate_profile: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -137,6 +138,7 @@ class RunPlan:
             overall_status=data.get("overall_status", "PENDING"),
             executor_profile=data.get("executor_profile"),
             validator_profile=data.get("validator_profile"),
+            gate_profile=data.get("gate_profile"),
         )
 
 
@@ -361,10 +363,16 @@ def render_plan_markdown(plan: RunPlan) -> str:
         f"**Overall status:** {plan.overall_status}",
         f"**Auto repair prepare on fail:** {plan.auto_repair_prepare_on_fail}",
         f"**Stop on gate WARN:** {plan.stop_on_warn}",
-        "",
-        "| Step | Action | Status | Profile/Runner | Reason |",
-        "|------|--------|--------|----------------|--------|",
     ]
+    if plan.gate_profile:
+        lines.append(f"**Gate profile:** `{plan.gate_profile}`")
+    lines.extend(
+        [
+            "",
+            "| Step | Action | Status | Profile/Runner | Reason |",
+            "|------|--------|--------|----------------|--------|",
+        ]
+    )
     for s in plan.steps:
         if s.action == "stop":
             continue
@@ -483,6 +491,7 @@ def build_default_plan(
     auto_repair_prepare_on_fail: bool,
     stop_on_warn: bool = True,
     checkpoints: list[tuple[str, str]] | None = None,
+    gate_profile: str | None = None,
 ) -> RunPlan:
     run_dir, meta = store.get_run(run_id)
     repo = Path(meta.repo_path)
@@ -562,6 +571,7 @@ def build_default_plan(
         stop_on_warn=stop_on_warn,
         executor_profile=ex_prof,
         validator_profile=val_prof,
+        gate_profile=gate_profile,
     )
 
 
@@ -617,6 +627,7 @@ def create_plan(
     dry_run: bool = False,
     checkpoints: list[tuple[str, str]] | None = None,
     policy_name: str | None = None,
+    gate_profile: str | None = None,
 ) -> RunPlan:
     run_dir, meta = store.get_run(run_id)
     if plan_json_path(run_dir).exists() and not force:
@@ -631,6 +642,11 @@ def create_plan(
         checkpoints=checkpoints,
     )
 
+    from governor.project_config import resolve_gate_profile_for_repo
+
+    repo = Path(meta.repo_path)
+    resolved_gate_profile = resolve_gate_profile_for_repo(repo, gate_profile)
+
     plan = build_default_plan(
         store,
         run_id,
@@ -642,6 +658,7 @@ def create_plan(
         validator_command=validator_command,
         auto_repair_prepare_on_fail=effective_auto,
         checkpoints=effective_cps or None,
+        gate_profile=resolved_gate_profile,
     )
 
     if dry_run:
@@ -663,6 +680,8 @@ def create_plan(
     cmd = f"python -m governor plan create --run-id {run_id}"
     if policy_name or meta.policy:
         cmd += f" --policy {pol}"
+    if resolved_gate_profile:
+        cmd += f" --gate-profile {resolved_gate_profile}"
     store.append_command(run_id, cmd)
     if pack.plan_defaults.recommend_evidence_export:
         store.append_command(
@@ -769,7 +788,7 @@ def _execute_gate_step(
         return "BLOCKED", 1
 
     target_repo = Path(meta.repo_path)
-    report = run_gates(target_repo)
+    report = run_gates(target_repo, gate_profile=plan.gate_profile)
     write_gate_artifacts(run_dir, report)
     store.update_state(meta.run_id, "gate")
     store.append_command(meta.run_id, f"python -m governor gate --run-id {meta.run_id}")

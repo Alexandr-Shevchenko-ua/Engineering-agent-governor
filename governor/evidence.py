@@ -93,6 +93,7 @@ def build_evidence_bundle(
                 "step_counts": plan_status_summary(plan),
                 "executor_profile": plan.executor_profile,
                 "validator_profile": plan.validator_profile,
+                "gate_profile": getattr(plan, "gate_profile", None),
             }
         except (ValueError, json.JSONDecodeError):
             plan_summary = {"error": "unreadable plan"}
@@ -132,6 +133,7 @@ def build_evidence_bundle(
         "plan": plan_summary,
         "commands_executed": list(meta.commands_executed),
         "gate": gate,
+        "gate_profile": gate.get("gate_profile") if isinstance(gate, dict) else None,
         "validator_verdict": verdict,
         "validator_summary": (validator_text or "")[:1500] if validator_text else None,
         "human_checkpoints_file": CHECKPOINTS_MD if cp_path.is_file() else None,
