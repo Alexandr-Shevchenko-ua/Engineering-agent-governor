@@ -41,6 +41,7 @@ PLAN_ACTIONS = frozenset(
         "dispatch_validator",
         "report",
         "repair_prepare",
+        "human_checkpoint",
         "stop",
     }
 )
@@ -48,6 +49,16 @@ PLAN_ACTIONS = frozenset(
 APPROVE_REQUIRED_MSG = (
     "Plan includes dispatch steps that require --approve to execute. "
     "Re-run with: python -m governor plan execute --run-id <id> --approve --repo-path ."
+)
+
+RESUME_APPROVE_REQUIRED_MSG = (
+    "Plan resume includes dispatch steps that require --approve. "
+    "Re-run with: python -m governor plan resume --run-id <id> --approve --repo-path ."
+)
+
+RESUME_REPAIR_MANUAL_MSG = (
+    "Gate failed and repair prompt exists. Dispatch repair manually or start a new plan "
+    "after repair — plan resume does not auto-dispatch repair."
 )
 
 
@@ -66,6 +77,7 @@ class PlanStep:
     output_ref: str | None = None
     reason: str | None = None
     run_on_fail_only: bool = False
+    checkpoint_message: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -86,6 +98,7 @@ class PlanStep:
             output_ref=data.get("output_ref"),
             reason=data.get("reason"),
             run_on_fail_only=data.get("run_on_fail_only", False),
+            checkpoint_message=data.get("checkpoint_message"),
         )
 
 
@@ -171,9 +184,172 @@ def plan_status_summary(plan: RunPlan) -> dict[str, int]:
 
 def next_pending_step(plan: RunPlan) -> PlanStep | None:
     for step in plan.steps:
-        if step.status == "PENDING":
+        if step.status in ("PENDING", "BLOCKED"):
             return step
     return None
+
+
+@dataclass
+class PlanValidationLine:
+    level: str  # OK, WARN, FAIL
+    message: str
+
+
+def _gate_fail_with_repair_prepared(run_dir: Path, plan: RunPlan) -> bool:
+    from governor.repair_artifacts import list_repair_prompts
+
+    gate = next((s for s in plan.steps if s.step_id == "gate"), None)
+    if gate and gate.status == "FAIL" and list_repair_prompts(run_dir):
+        return True
+    return False
+
+
+def _prepare_steps_for_resume(
+    plan: RunPlan,
+    run_dir: Path,
+    *,
+    replace: bool,
+) -> None:
+    for step in plan.steps:
+        if step.status in ("PASS", "SKIPPED"):
+            continue
+        if step.action == "human_checkpoint" and step.status == "BLOCKED":
+            continue
+        if step.status == "FAIL" and step.step_id != "gate":
+            step.status = "PENDING"
+            step.reason = None
+        elif step.status == "BLOCKED" and step.action != "human_checkpoint":
+            step.status = "PENDING"
+            step.reason = None
+        if step.status != "PENDING":
+            continue
+        if step.action == "dispatch_executor":
+            out = run_dir / ROLE_OUTPUT_FILES["executor"]
+            if out.is_file() and not replace:
+                step.status = "SKIPPED"
+                step.reason = "artifact already exists"
+        elif step.action == "dispatch_validator":
+            out = run_dir / ROLE_OUTPUT_FILES["validator"]
+            if out.is_file() and not replace:
+                step.status = "SKIPPED"
+                step.reason = "artifact already exists"
+
+
+def validate_plan(store: RunStore, run_id: str) -> tuple[list[PlanValidationLine], bool]:
+    """Validate 12_run_plan.json; return (lines, has_fail)."""
+    run_dir, meta = store.get_run(run_id)
+    lines: list[PlanValidationLine] = []
+    has_fail = False
+
+    def add(level: str, message: str) -> None:
+        nonlocal has_fail
+        lines.append(PlanValidationLine(level=level, message=message))
+        if level == "FAIL":
+            has_fail = True
+
+    try:
+        plan = load_plan(run_dir)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        add("FAIL", f"Cannot load plan: {e}")
+        return lines, True
+
+    if plan.version != PLAN_VERSION:
+        add("WARN", f"Plan version {plan.version} (expected {PLAN_VERSION})")
+    if plan.run_id != meta.run_id:
+        add("FAIL", f"Plan run_id {plan.run_id!r} != metadata {meta.run_id!r}")
+
+    seen_ids: set[str] = set()
+    repo = Path(meta.repo_path)
+    for step in plan.steps:
+        if step.step_id in seen_ids:
+            add("FAIL", f"Duplicate step_id: {step.step_id}")
+        seen_ids.add(step.step_id)
+        if step.action not in PLAN_ACTIONS:
+            add("FAIL", f"Unknown action {step.action!r} on step {step.step_id}")
+        if step.status not in STEP_STATUSES:
+            add("FAIL", f"Unknown status {step.status!r} on step {step.step_id}")
+        if step.action in ("dispatch_executor", "dispatch_validator"):
+            if not step.role:
+                add("FAIL", f"Step {step.step_id}: dispatch missing role")
+            if not step.profile and not step.runner:
+                add("FAIL", f"Step {step.step_id}: dispatch needs profile or runner")
+            if step.profile:
+                try:
+                    prof, _ = get_profile(repo, step.profile)
+                    if not prof.enabled:
+                        add("FAIL", f"Step {step.step_id}: profile {step.profile!r} disabled")
+                except ValueError as e:
+                    add("FAIL", f"Step {step.step_id}: {e}")
+            if step.command:
+                try:
+                    check_secret_argv(step.command)
+                except ValueError as e:
+                    add("FAIL", f"Step {step.step_id}: {e}")
+        if step.state_precondition:
+            try:
+                RunState(step.state_precondition)
+            except ValueError:
+                add("FAIL", f"Step {step.step_id}: unknown state_precondition")
+
+    if not has_fail:
+        add("OK", f"Plan valid ({len(plan.steps)} steps)")
+    return lines, has_fail
+
+
+def approve_checkpoint(
+    store: RunStore,
+    run_id: str,
+    step_id: str,
+    *,
+    note: str,
+) -> PlanStep:
+    from governor.evidence import CHECKPOINTS_MD, checkpoints_path
+
+    if not note or not note.strip():
+        raise ValueError("Checkpoint approval requires --note")
+
+    run_dir, meta = store.get_run(run_id)
+    plan = load_plan(run_dir)
+    step = next((s for s in plan.steps if s.step_id == step_id), None)
+    if step is None:
+        raise ValueError(f"Unknown step_id {step_id!r}")
+    if step.action != "human_checkpoint":
+        raise ValueError(f"Step {step_id!r} is not a human_checkpoint (action={step.action})")
+    if step.status == "PASS":
+        raise ValueError(f"Checkpoint {step_id!r} already approved")
+
+    step.status = "PASS"
+    step.reason = note.strip()
+    plan.updated_at = utc_now_iso()
+    save_plan(run_dir, plan)
+
+    cp_path = checkpoints_path(run_dir)
+    header = f"## {step_id} — {utc_now_iso()}\n\n"
+    block = (
+        f"{header}"
+        f"**Message:** {step.checkpoint_message or '(none)'}\n\n"
+        f"**Note:** {note.strip()}\n\n"
+    )
+    if cp_path.is_file():
+        cp_path.write_text(cp_path.read_text(encoding="utf-8") + "\n" + block, encoding="utf-8")
+    else:
+        cp_path.write_text(f"# Human checkpoints\n\n{block}", encoding="utf-8")
+
+    trace = TraceLogger(run_dir, meta.run_id)
+    trace.append(
+        phase="plan",
+        actor="human",
+        action="human_checkpoint_approve",
+        output_ref=CHECKPOINTS_MD,
+        status="ok",
+        reason=f"{step_id}: {note.strip()[:120]}",
+    )
+    store.append_command(
+        run_id,
+        f"python -m governor plan checkpoint --run-id {run_id} "
+        f"--step-id {step_id} --approve --note \"...\"",
+    )
+    return step
 
 
 def render_plan_markdown(plan: RunPlan) -> str:
@@ -268,6 +444,31 @@ def _make_dispatch_step(
     )
 
 
+def _insert_checkpoints(
+    steps: list[PlanStep],
+    checkpoints: list[tuple[str, str]],
+) -> list[PlanStep]:
+    if not checkpoints:
+        return steps
+    after_map = dict(checkpoints)
+    out: list[PlanStep] = []
+    for step in steps:
+        out.append(step)
+        if step.step_id in after_map:
+            msg = after_map[step.step_id]
+            out.append(
+                PlanStep(
+                    step_id=f"checkpoint_after_{step.step_id}",
+                    action="human_checkpoint",
+                    status="PENDING",
+                    checkpoint_message=msg,
+                    reason=msg,
+                    output_ref="13_human_checkpoints.md",
+                )
+            )
+    return out
+
+
 def build_default_plan(
     store: RunStore,
     run_id: str,
@@ -280,6 +481,7 @@ def build_default_plan(
     validator_command: list[str] | None,
     auto_repair_prepare_on_fail: bool,
     stop_on_warn: bool = True,
+    checkpoints: list[tuple[str, str]] | None = None,
 ) -> RunPlan:
     run_dir, meta = store.get_run(run_id)
     repo = Path(meta.repo_path)
@@ -345,6 +547,8 @@ def build_default_plan(
             )
         )
 
+    steps = _insert_checkpoints(steps, checkpoints or [])
+
     now = utc_now_iso()
     return RunPlan(
         version=PLAN_VERSION,
@@ -373,6 +577,7 @@ def create_plan(
     auto_repair_prepare_on_fail: bool = False,
     force: bool = False,
     dry_run: bool = False,
+    checkpoints: list[tuple[str, str]] | None = None,
 ) -> RunPlan:
     run_dir, meta = store.get_run(run_id)
     if plan_json_path(run_dir).exists() and not force:
@@ -390,6 +595,7 @@ def create_plan(
         validator_runner=validator_runner,
         validator_command=validator_command,
         auto_repair_prepare_on_fail=auto_repair_prepare_on_fail,
+        checkpoints=checkpoints,
     )
 
     if dry_run:
@@ -557,6 +763,7 @@ def execute_plan(
     accept_failed_output: bool = False,
     max_steps: int = 10,
     repo_path: str = ".",
+    resume: bool = False,
 ) -> PlanExecutionResult:
     run_dir, meta = store.get_run(run_id)
     plan = load_plan(run_dir)
@@ -564,26 +771,49 @@ def execute_plan(
     if stop_on_warn is not None:
         plan.stop_on_warn = stop_on_warn
 
+    approve_msg = RESUME_APPROVE_REQUIRED_MSG if resume else APPROVE_REQUIRED_MSG
+
+    if resume and not dry_run:
+        blocked = _gate_fail_with_repair_prepared(run_dir, plan)
+        if blocked:
+            return PlanExecutionResult(
+                overall_status="BLOCKED",
+                steps_run=0,
+                stopped_at="gate",
+                message=RESUME_REPAIR_MANUAL_MSG,
+                exit_code=1,
+            )
+        _prepare_steps_for_resume(plan, run_dir, replace=replace)
+        save_plan(run_dir, plan)
+
     dispatch_steps = [
         s
         for s in plan.steps
-        if s.action in ("dispatch_executor", "dispatch_validator") and s.status == "PENDING"
+        if s.action in ("dispatch_executor", "dispatch_validator")
+        and s.status == "PENDING"
     ]
     if dispatch_steps and not approve and not dry_run:
         return PlanExecutionResult(
             overall_status="BLOCKED",
             steps_run=0,
             stopped_at=None,
-            message=APPROVE_REQUIRED_MSG,
+            message=approve_msg,
             exit_code=1,
         )
 
     if dry_run:
-        lines = ["Dry run — would execute:"]
+        prefix = "Resume dry run" if resume else "Dry run"
+        lines = [f"{prefix} — would execute:"]
         for s in plan.steps:
-            if s.status != "PENDING" or s.action == "stop":
+            if s.action == "stop":
                 continue
-            lines.append(f"  - {s.step_id}: {s.action}")
+            if resume and s.status in ("PASS", "SKIPPED"):
+                continue
+            if not resume and s.status != "PENDING":
+                continue
+            if resume and s.status not in ("PENDING", "BLOCKED"):
+                continue
+            lines.append(f"  - {s.step_id}: {s.action} ({s.status})")
         return PlanExecutionResult(
             overall_status=plan.overall_status,
             steps_run=0,
@@ -593,10 +823,12 @@ def execute_plan(
         )
 
     trace = TraceLogger(run_dir, meta.run_id)
+    start_action = "plan_resume_start" if resume else "plan_execute_start"
+    stop_action = "plan_resume_stop" if resume else "plan_execute_stop"
     trace.append(
         phase="plan",
         actor="governor",
-        action="plan_execute_start",
+        action=start_action,
         output_ref=PLAN_JSON,
         status="ok",
     )
@@ -612,7 +844,11 @@ def execute_plan(
             continue
         if step.run_on_fail_only:
             continue
-        if step.status not in ("PENDING", "RUNNING"):
+        if resume and step.status in ("PASS", "SKIPPED"):
+            continue
+        if not resume and step.status not in ("PENDING", "RUNNING"):
+            continue
+        if resume and step.status not in ("PENDING", "RUNNING", "BLOCKED"):
             continue
         if steps_run >= max_steps:
             plan.overall_status = "BLOCKED"
@@ -731,6 +967,18 @@ def execute_plan(
                 step_exit = 0
                 plan.overall_status = "STOPPED"
                 stopped_at = step.step_id
+            elif step.action == "human_checkpoint":
+                if step.status == "PASS":
+                    step_status, step_exit = "PASS", 0
+                else:
+                    msg = step.checkpoint_message or "Human review required"
+                    step.reason = (
+                        f"{msg}. Approve: python -m governor plan checkpoint "
+                        f"--run-id {meta.run_id} --step-id {step.step_id} "
+                        f"--approve --note \"...\""
+                    )
+                    step_status = "BLOCKED"
+                    step_exit = 1
             else:
                 step.status = "BLOCKED"
                 step.reason = f"unknown action {step.action}"
@@ -778,14 +1026,15 @@ def execute_plan(
     trace.append(
         phase="plan",
         actor="governor",
-        action="plan_execute_stop",
+        action=stop_action,
         output_ref=PLAN_JSON,
         status=plan.overall_status.lower(),
         reason=stopped_at or "complete",
     )
 
     _, meta = store.get_run(run_id)
-    msg = f"Plan {plan.overall_status}"
+    label = "Resume" if resume else "Plan"
+    msg = f"{label} {plan.overall_status}"
     if stopped_at:
         msg += f" at step {stopped_at}"
     msg += f"; run state={meta.state}"
@@ -796,3 +1045,12 @@ def execute_plan(
         message=msg,
         exit_code=0 if plan.overall_status == "PASS" else exit_code or 1,
     )
+
+
+def resume_plan(
+    store: RunStore,
+    run_id: str,
+    **kwargs: Any,
+) -> PlanExecutionResult:
+    """Resume an existing plan from the first incomplete step."""
+    return execute_plan(store, run_id, resume=True, **kwargs)

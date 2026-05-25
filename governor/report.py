@@ -11,6 +11,7 @@ from governor.repair_artifacts import (
     list_repair_outputs,
     list_repair_prompts,
 )
+from governor.evidence import EVIDENCE_JSON, EVIDENCE_MD, evidence_json_path
 from governor.run_plan import load_plan, plan_json_path, plan_status_summary
 from governor.run_store import RunStore
 from governor.verdict import parse_validator_verdict
@@ -288,6 +289,16 @@ def generate_reports(store: RunStore, run_id: str) -> tuple[Path, Path]:
     )
     for cmd in meta.commands_executed:
         report_lines.append(f"- `{cmd}`")
+    if evidence_json_path(run_dir).is_file() or (run_dir / EVIDENCE_MD).is_file():
+        report_lines.extend(
+            [
+                "",
+                "## Evidence bundle",
+                "",
+                f"Exported review artifact: `{EVIDENCE_MD}`, `{EVIDENCE_JSON}`.",
+                "Prompt bodies excluded by default; use `evidence export --include-prompts` if needed.",
+            ]
+        )
     report_lines.extend(["", "## Artifact list", ""])
     for a in artifacts:
         report_lines.append(f"- `{a}`")

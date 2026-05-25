@@ -31,9 +31,12 @@ from governor.index import list_entries
 from governor.models import NEXT_ACTIONS, RunState
 from governor.repair import list_repair_artifacts, prepare_repair
 from governor.report import generate_reports
+from governor.evidence import EVIDENCE_JSON, EVIDENCE_MD, evidence_json_path, export_evidence
 from governor.run_plan import (
     APPROVE_REQUIRED_MSG,
     PLAN_JSON,
+    RESUME_APPROVE_REQUIRED_MSG,
+    approve_checkpoint,
     create_plan,
     execute_plan,
     load_plan,
@@ -41,6 +44,8 @@ from governor.run_plan import (
     plan_json_path,
     plan_status_summary,
     render_plan_markdown,
+    resume_plan,
+    validate_plan,
 )
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
@@ -77,6 +82,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_status = sub.add_parser("status", help="Show run status", parents=[parent])
     p_status.add_argument("--run-id", default=None, help="Run ID (default: latest)")
+    p_status.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
 
     p_record = sub.add_parser("record", help="Record delegated agent output", parents=[parent])
     p_record.add_argument("--run-id", required=True)
@@ -268,6 +274,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_plan_create.add_argument("--force", action="store_true")
     p_plan_create.add_argument("--dry-run", action="store_true")
+    p_plan_create.add_argument(
+        "--checkpoint",
+        action="append",
+        default=[],
+        help="Checkpoint message (pair with --checkpoint-after)",
+    )
+    p_plan_create.add_argument(
+        "--checkpoint-after",
+        action="append",
+        default=[],
+        metavar="STEP_ID",
+        help="Insert human_checkpoint after this step (e.g. gate, validator)",
+    )
 
     p_plan_show = plan_sub.add_parser("show", help="Show plan steps", parents=[parent])
     p_plan_show.add_argument("--run-id", required=True)
@@ -295,7 +314,105 @@ def _build_parser() -> argparse.ArgumentParser:
     p_plan_exec.add_argument("--accept-failed-output", action="store_true")
     p_plan_exec.add_argument("--max-steps", type=int, default=10)
 
+    p_plan_resume = plan_sub.add_parser(
+        "resume",
+        help="Resume plan from first incomplete step (not autopilot)",
+        parents=[parent],
+    )
+    p_plan_resume.add_argument("--run-id", required=True)
+    p_plan_resume.add_argument("--approve", action="store_true")
+    p_plan_resume.add_argument("--until", default=None, metavar="STEP_ID")
+    p_plan_resume.add_argument("--dry-run", action="store_true")
+    p_plan_resume.add_argument("--continue-on-gate-warn", action="store_true")
+    p_plan_resume.add_argument("--replace", action="store_true")
+    p_plan_resume.add_argument("--accept-failed-output", action="store_true")
+    p_plan_resume.add_argument("--max-steps", type=int, default=10)
+
+    p_plan_validate = plan_sub.add_parser(
+        "validate",
+        help="Validate 12_run_plan.json",
+        parents=[parent],
+    )
+    p_plan_validate.add_argument("--run-id", required=True)
+
+    p_plan_checkpoint = plan_sub.add_parser(
+        "checkpoint",
+        help="Approve a human_checkpoint step",
+        parents=[parent],
+    )
+    p_plan_checkpoint.add_argument("--run-id", required=True)
+    p_plan_checkpoint.add_argument("--step-id", required=True)
+    p_plan_checkpoint.add_argument("--approve", action="store_true", required=True)
+    p_plan_checkpoint.add_argument("--note", required=True, help="Required approval note")
+
+    p_evidence = sub.add_parser(
+        "evidence",
+        help="Export lead/MR review evidence bundle",
+        parents=[parent],
+    )
+    evidence_sub = p_evidence.add_subparsers(dest="evidence_cmd", required=True)
+    p_ev_export = evidence_sub.add_parser("export", help="Write 14_evidence_bundle.*", parents=[parent])
+    p_ev_export.add_argument("--run-id", required=True)
+    p_ev_export.add_argument(
+        "--format",
+        choices=["both", "markdown", "json"],
+        default="both",
+        help="Output format (default: both md and json)",
+    )
+    p_ev_export.add_argument(
+        "--include-prompts",
+        action="store_true",
+        help="Include full prompt bodies in JSON bundle",
+    )
+
     return parser
+
+
+def _parse_checkpoints(
+    messages: list[str],
+    after_steps: list[str],
+) -> list[tuple[str, str]]:
+    if not after_steps:
+        return []
+    out: list[tuple[str, str]] = []
+    for i, after in enumerate(after_steps):
+        msg = messages[i] if i < len(messages) else "Human review required"
+        out.append((after, msg))
+    return out
+
+
+def _status_payload(store: RunStore, run_dir: Path, meta) -> dict:
+    plan_summary: dict | None = None
+    next_plan: str | None = None
+    if plan_json_path(run_dir).is_file():
+        try:
+            plan = load_plan(run_dir)
+            plan_summary = {
+                "overall_status": plan.overall_status,
+                "step_counts": plan_status_summary(plan),
+            }
+            nxt = next_pending_step(plan)
+            if nxt:
+                next_plan = f"{nxt.step_id} ({nxt.action})"
+        except (ValueError, json.JSONDecodeError):
+            plan_summary = {"error": "unreadable"}
+
+    return {
+        "run_id": meta.run_id,
+        "task": meta.task,
+        "state": meta.state,
+        "outcome": meta.outcome,
+        "repair_count": meta.repair_count,
+        "repair_prompt_count": getattr(meta, "repair_prompt_count", 0),
+        "plan": plan_summary,
+        "next_plan_step": next_plan,
+        "next_action": NEXT_ACTIONS.get(RunState(meta.state), ""),
+        "evidence_bundle_exists": evidence_json_path(run_dir).is_file()
+        or (run_dir / EVIDENCE_MD).is_file(),
+        "folder": str(run_dir),
+        "created_at": meta.created_at,
+        "updated_at": meta.updated_at,
+    }
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -315,6 +432,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+    if args.as_json:
+        print(json.dumps(_status_payload(store, run_dir, meta), indent=2, ensure_ascii=False))
+        return 0
 
     artifacts = store.list_artifacts(run_dir)
     print(f"Run ID:     {meta.run_id}")
@@ -337,6 +458,8 @@ def cmd_status(args: argparse.Namespace) -> int:
                 print(f"Next plan:  {nxt.step_id} ({nxt.action})")
         except (FileNotFoundError, ValueError, json.JSONDecodeError):
             print("Plan:       present but unreadable")
+    ev = evidence_json_path(run_dir).is_file() or (run_dir / EVIDENCE_MD).is_file()
+    print(f"Evidence:   {'yes' if ev else 'no'}")
     print(f"Next:       {NEXT_ACTIONS.get(RunState(meta.state), 'See run_state.json')}")
     return 0
 
@@ -657,6 +780,7 @@ def cmd_config_validate(args: argparse.Namespace) -> int:
 def cmd_plan_create(args: argparse.Namespace) -> int:
     try:
         store = open_store(_repo_path_from_args(args))
+        checkpoints = _parse_checkpoints(args.checkpoint, args.checkpoint_after)
         plan = create_plan(
             store,
             args.run_id,
@@ -669,6 +793,7 @@ def cmd_plan_create(args: argparse.Namespace) -> int:
             auto_repair_prepare_on_fail=args.auto_repair_prepare_on_fail,
             force=args.force,
             dry_run=args.dry_run,
+            checkpoints=checkpoints or None,
         )
         if args.dry_run:
             print(render_plan_markdown(plan))
@@ -728,6 +853,83 @@ def cmd_plan_execute(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_plan_resume(args: argparse.Namespace) -> int:
+    repo_path = _repo_path_from_args(args)
+    try:
+        store = open_store(repo_path)
+        result = resume_plan(
+            store,
+            args.run_id,
+            approve=args.approve,
+            until=args.until,
+            dry_run=args.dry_run,
+            stop_on_warn=False if args.continue_on_gate_warn else None,
+            continue_on_gate_warn=args.continue_on_gate_warn,
+            replace=args.replace,
+            accept_failed_output=args.accept_failed_output,
+            max_steps=args.max_steps,
+            repo_path=repo_path,
+        )
+        if result.message == RESUME_APPROVE_REQUIRED_MSG:
+            print(RESUME_APPROVE_REQUIRED_MSG, file=sys.stderr)
+            return result.exit_code
+        print(result.message)
+        return result.exit_code
+    except (FileNotFoundError, FileExistsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_plan_validate(args: argparse.Namespace) -> int:
+    try:
+        store = open_store(_repo_path_from_args(args))
+        lines, has_fail = validate_plan(store, args.run_id)
+        for line in lines:
+            print(f"{line.level}: {line.message}")
+        return 1 if has_fail else 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_plan_checkpoint(args: argparse.Namespace) -> int:
+    try:
+        store = open_store(_repo_path_from_args(args))
+        step = approve_checkpoint(
+            store,
+            args.run_id,
+            args.step_id,
+            note=args.note,
+        )
+        print(f"Checkpoint {step.step_id}: PASS")
+        print(f"Note: {step.reason}")
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_evidence_export(args: argparse.Namespace) -> int:
+    try:
+        store = open_store(_repo_path_from_args(args))
+        fmt = args.format
+        md_p, json_p = export_evidence(
+            store,
+            args.run_id,
+            include_prompts=args.include_prompts,
+            write_markdown=fmt in ("both", "markdown"),
+            write_json=fmt in ("both", "json"),
+        )
+        if md_p:
+            print(f"Wrote: {md_p.name}")
+        if json_p:
+            print(f"Wrote: {json_p.name}")
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_config_path(args: argparse.Namespace) -> int:
     repo = resolve_repo_path(_repo_path_from_args(args))
     print(config_path(repo))
@@ -769,8 +971,14 @@ def main(argv: list[str] | None = None) -> int:
             "create": cmd_plan_create,
             "show": cmd_plan_show,
             "execute": cmd_plan_execute,
+            "resume": cmd_plan_resume,
+            "validate": cmd_plan_validate,
+            "checkpoint": cmd_plan_checkpoint,
         }
         return plan_handlers[args.plan_cmd](args)
+    if args.command == "evidence":
+        if args.evidence_cmd == "export":
+            return cmd_evidence_export(args)
     return handlers[args.command](args)
 
 

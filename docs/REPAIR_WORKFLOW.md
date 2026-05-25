@@ -73,7 +73,7 @@ If you `report` while still in `REPAIR_RECORDED` after repair without re-gating,
 
 Always re-run `gate` after repair before trusting closure.
 
-Run plans can call `repair prepare` automatically on failure but **never** dispatch repair. See [RUN_PLANS.md](RUN_PLANS.md).
+Run plans can call `repair prepare` automatically on failure but **never** dispatch repair. **Plan resume** also does not dispatch repair — if gate failed and a repair prompt exists, resume is blocked until you repair manually. See [RUN_PLANS.md](RUN_PLANS.md).
 
 ## List artifacts
 

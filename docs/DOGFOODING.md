@@ -49,14 +49,20 @@ Inspect artifacts under `.governor/runs/<run-id>/` before merging. That director
 
 Optional: `doctor` before starting; `list` / `status` anytime.
 
-## Run plans (v0.5)
+## Run plans (v0.6)
 
 See [RUN_PLANS.md](RUN_PLANS.md). Bounded orchestration — **not** autopilot.
 
 ```bash
 python -m governor plan create --run-id "$RUN_ID" --executor-profile echo-test --validator-profile fake-validator --repo-path .
 python -m governor plan execute --run-id "$RUN_ID" --approve --repo-path .
+# After checkpoint stop:
+python -m governor plan checkpoint --run-id "$RUN_ID" --step-id checkpoint_after_gate --approve --note "Reviewed" --repo-path .
+python -m governor plan resume --run-id "$RUN_ID" --approve --repo-path .
+python -m governor evidence export --run-id "$RUN_ID" --repo-path .
 ```
+
+See [EVIDENCE_BUNDLES.md](EVIDENCE_BUNDLES.md) for MR/lead export. `status --json` includes plan and evidence flags.
 
 ## Repair workflow (v0.4)
 

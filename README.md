@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.5.0** adds **bounded run plans** (`plan create` / `plan execute`) plus repair packs and runner profiles under `.governor/`.
+Local **delegation-first control plane** for engineering work executed by external agents (e.g. Cursor Agent). **v0.6.0** adds **plan resume**, **human checkpoints**, and **evidence bundle export** on top of bounded run plans, repair packs, and runner profiles under `.governor/`.
 
 ## What this is
 
@@ -62,7 +62,8 @@ gov init --task "My task" --repo-path .
 | `dispatch` | Preview or run local runner (`--runner` or `--profile`; `--approve` to execute) |
 | `config` | Manage local runner profiles (`init`, `show`, `validate`, `path`) |
 | `repair` | Prepare repair prompts (`prepare`, `list`) — not autopilot |
-| `plan` | Bounded run plan (`create`, `show`, `execute --approve`) |
+| `plan` | Bounded run plan (`create`, `show`, `execute`, `resume`, `validate`, `checkpoint`) |
+| `evidence` | Export review bundle (`export` → `14_evidence_bundle.md/json`) |
 | `gate` | Run local checks → `08_gate_results.json` / `.md` |
 | `report` | Generate `09_final_report.md` and `10_lead_update.md` |
 
@@ -74,7 +75,9 @@ gov init --task "My task" --repo-path .
 
 **Run plans:** [docs/RUN_PLANS.md](docs/RUN_PLANS.md)
 
-**Smoke tests:** `smoke_governor_workflow.py` · `smoke_dispatch_workflow.py` · `smoke_profile_workflow.py` · `smoke_repair_workflow.py` · `smoke_plan_workflow.py`
+**Evidence bundles:** [docs/EVIDENCE_BUNDLES.md](docs/EVIDENCE_BUNDLES.md)
+
+**Smoke tests:** `smoke_governor_workflow.py` · `smoke_dispatch_workflow.py` · `smoke_profile_workflow.py` · `smoke_repair_workflow.py` · `smoke_plan_workflow.py` · `smoke_resume_checkpoint_evidence_workflow.py`
 
 ## Dispatch is not autopilot
 
