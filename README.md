@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-**v1.3.0** — local control plane (Cursor Headless executor, Chatbang Governor Advisor, **experimental Governor Mode** with chatbang and **Cursor Governor Provider** `cursor-auto`) for agent-delegated engineering: auditable runs, gates, plans, evidence, and review packages. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
+**v1.4.0** — local control plane (Cursor Headless executor, Chatbang Governor Advisor, **Governor Mode** with chatbang and **Cursor Governor Provider** `cursor-auto`, **run evaluation metrics**) for agent-delegated engineering: auditable runs, gates, plans, evidence, review packages, and local success/friction scoring. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
 
 ## Not autopilot
 
@@ -12,6 +12,40 @@
 | Export evidence and PR-ready review packs | Call external LLM APIs |
 
 Keep **`.governor/` gitignored** (local runs and runner argv). Commit **`governor.project.json`** (policies and gate profiles — no secrets).
+
+## Architecture
+
+```text
+  propose (chatbang | cursor-auto)     advisor ask (existing run)
+           │                                    │
+           ▼                                    ▼
+     proposal.json                      16_advisor_*.md
+           │                                    │
+           └──────────────┬─────────────────────┘
+                          ▼
+              apply --approve → run + plan
+                          ▼
+              run resume --approve → dispatch executor (may write repo)
+                          ▼
+                    gates → validator → report
+```
+
+| Layer | Command examples | Modifies repo? |
+|-------|------------------|----------------|
+| Proposal | `governor propose` (`chatbang` / `cursor-auto`) | No |
+| Advice | `advisor ask` | No |
+| Execute | `dispatch`, `run resume --approve` | Yes (when approved) |
+
+Full role boundaries: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** · Common issues: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
+
+```bash
+python -m governor safety audit --repo-path .
+python -m governor diagnose --run-id <run-id> --repo-path .
+python -m governor cleanup status --repo-path .
+python -m governor evaluate run --run-id <run-id> --repo-path .
+```
+
+Success is measured by **lower manual rework and reviewer burden**, not by lines changed — see [docs/EVALUATION_METRICS.md](docs/EVALUATION_METRICS.md).
 
 ## Quick workflows
 
@@ -70,7 +104,8 @@ Human → governor CLI → .governor/runs/<run-id>/artifacts
 | Agents | `dispatch`, `record`, `repair`, `plan` |
 | Handoff | `evidence`, `review` |
 | Config | `config`, `project`, `policy`, `version` |
-| Experimental | `governor propose`, `validate`, `apply`, `compare` (`chatbang` or `cursor-auto` planner) |
+| Ops | `safety audit`, `diagnose`, `cleanup`, `evaluate` |
+| Governor Mode | `governor propose`, `validate`, `apply`, `compare` (`chatbang` or `cursor-auto` planner) |
 
 Full reference: **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)**
 
@@ -93,6 +128,7 @@ CI: `.github/workflows/ci.yml` (Python 3.11 / 3.12, pytest, smokes).
 - [docs/CURSOR_GOVERNOR_PROVIDER.md](docs/CURSOR_GOVERNOR_PROVIDER.md) — Cursor `cursor-auto` proposal provider (read-only)
 - [docs/CHATBANG_GOVERNOR_MODE.md](docs/CHATBANG_GOVERNOR_MODE.md) — Chatbang proposal lifecycle
 - [docs/CHATBANG_GOVERNOR_ADVISOR.md](docs/CHATBANG_GOVERNOR_ADVISOR.md)
+- [docs/EVALUATION_METRICS.md](docs/EVALUATION_METRICS.md) — run metrics, scoring, post-MR annotation
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
 - [docs/DOGFOODING.md](docs/DOGFOODING.md)
 

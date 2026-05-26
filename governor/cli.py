@@ -7,6 +7,7 @@ import json
 import platform
 import sys
 from pathlib import Path
+from typing import Any
 
 from governor import __version__
 from governor.config import (
@@ -86,6 +87,17 @@ from governor.governor_mode import (
     validate_proposal,
 )
 from governor.check import check_exit_code, run_check
+from governor.cleanup import cleanup_proposals, cleanup_runs, cleanup_status, human_size
+from governor.diagnose import diagnose_run
+from governor.evaluation import (
+    annotate_run,
+    build_summary,
+    evaluate_run,
+    export_evaluations,
+    format_summary_text,
+    load_run_evaluation,
+)
+from governor.safety_audit import run_safety_audit, safety_audit_exit_code
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
 from governor.utils import resolve_repo_path
@@ -141,6 +153,102 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Also run scripts/smoke_*.py from the Governor package",
     )
     p_check.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
+
+    p_safety = sub.add_parser(
+        "safety",
+        help="Safety and local-config audit (read-only; no tests)",
+        parents=[parent],
+    )
+    safety_sub = p_safety.add_subparsers(dest="safety_cmd", required=True)
+    p_safety_audit = safety_sub.add_parser(
+        "audit",
+        help="Audit gitignore, tracked secrets paths, profile safety",
+        parents=[parent],
+    )
+    p_safety_audit.add_argument("--json", action="store_true", dest="as_json")
+
+    p_cleanup = sub.add_parser(
+        "cleanup",
+        help="Local .governor retention (runs/proposals; dry-run default)",
+        parents=[parent],
+    )
+    cleanup_sub = p_cleanup.add_subparsers(dest="cleanup_cmd", required=True)
+    p_cleanup_status = cleanup_sub.add_parser("status", help="Show .governor sizes", parents=[parent])
+    p_cleanup_status.add_argument("--json", action="store_true", dest="as_json")
+    p_cleanup_runs = cleanup_sub.add_parser(
+        "runs",
+        help="Prune old run folders (newest kept)",
+        parents=[parent],
+    )
+    p_cleanup_runs.add_argument("--keep-last", type=int, default=20)
+    p_cleanup_runs.add_argument("--approve", action="store_true", help="Actually delete")
+    p_cleanup_runs.add_argument("--dry-run", action="store_true", help="Preview only (default)")
+    p_cleanup_runs.add_argument("--json", action="store_true", dest="as_json")
+    p_cleanup_props = cleanup_sub.add_parser(
+        "proposals",
+        help="Prune old proposal folders (newest kept)",
+        parents=[parent],
+    )
+    p_cleanup_props.add_argument("--keep-last", type=int, default=20)
+    p_cleanup_props.add_argument("--approve", action="store_true")
+    p_cleanup_props.add_argument("--dry-run", action="store_true")
+    p_cleanup_props.add_argument("--json", action="store_true", dest="as_json")
+
+    p_diagnose = sub.add_parser(
+        "diagnose",
+        help="Read-only run diagnostics and next-step hint",
+        parents=[parent],
+    )
+    p_diagnose.add_argument("--run-id", required=True)
+    p_diagnose.add_argument("--json", action="store_true", dest="as_json")
+
+    p_evaluate = sub.add_parser(
+        "evaluate",
+        help="Run evaluation metrics (local extraction, annotation, export)",
+        parents=[parent],
+    )
+    eval_sub = p_evaluate.add_subparsers(dest="evaluate_cmd", required=True)
+    p_eval_run = eval_sub.add_parser("run", help="Extract metrics and write 17_run_evaluation.*", parents=[parent])
+    p_eval_run.add_argument("--run-id", required=True)
+    p_eval_run.add_argument("--json", action="store_true", dest="as_json")
+    p_eval_show = eval_sub.add_parser("show", help="Show evaluation for a run", parents=[parent])
+    p_eval_show.add_argument("--run-id", required=True)
+    p_eval_show.add_argument("--json", action="store_true", dest="as_json")
+    p_eval_annotate = eval_sub.add_parser(
+        "annotate",
+        help="Update manual post-MR fields and recompute scores",
+        parents=[parent],
+    )
+    p_eval_annotate.add_argument("--run-id", required=True)
+    p_eval_annotate.add_argument("--manual-rework-minutes", type=int, default=None)
+    p_eval_annotate.add_argument("--mr-outcome", default=None)
+    p_eval_annotate.add_argument("--post-run-defects-found", action="store_true", default=None)
+    p_eval_annotate.add_argument("--no-post-run-defects", action="store_true")
+    p_eval_annotate.add_argument("--defect-types", nargs="*", default=None)
+    p_eval_annotate.add_argument("--reviewer-comments-count", type=int, default=None)
+    p_eval_annotate.add_argument("--lead-followup-questions-count", type=int, default=None)
+    p_eval_annotate.add_argument("--evidence-quality-score", type=int, default=None)
+    p_eval_annotate.add_argument("--reviewer-burden-score", type=int, default=None)
+    p_eval_annotate.add_argument("--note", default=None)
+    p_eval_annotate.add_argument("--json", action="store_true", dest="as_json")
+    p_eval_export = eval_sub.add_parser("export", help="Export evaluations index", parents=[parent])
+    p_eval_export.add_argument(
+        "--format",
+        choices=["csv", "jsonl", "markdown"],
+        default="csv",
+    )
+    p_eval_summary = eval_sub.add_parser("summary", help="Print evaluation summary table", parents=[parent])
+    p_eval_summary.add_argument(
+        "--by",
+        choices=["policy", "executor_profile", "governor_provider"],
+        default=None,
+    )
+    p_eval_summary.add_argument(
+        "--output",
+        default=None,
+        help="Write dashboard markdown (default: print to stdout)",
+    )
+    p_eval_summary.add_argument("--json", action="store_true", dest="as_json")
 
     p_init = sub.add_parser("init", help="Create a new governor run", parents=[parent])
     p_init.add_argument("--task", required=True, help="Task title / objective")
@@ -1911,6 +2019,194 @@ def cmd_check(args: argparse.Namespace) -> int:
     return check_exit_code(summary)
 
 
+def cmd_safety_audit(args: argparse.Namespace) -> int:
+    summary = run_safety_audit(_repo_path_from_args(args))
+    if args.as_json:
+        print(json.dumps(summary.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(f"Safety audit: {summary.overall}")
+        for r in summary.results:
+            print(f"  [{r.status:4}] {r.name}: {r.detail}")
+    return safety_audit_exit_code(summary)
+
+
+def cmd_cleanup_status(args: argparse.Namespace) -> int:
+    st = cleanup_status(_repo_path_from_args(args))
+    if args.as_json:
+        print(json.dumps(st.to_dict(), indent=2, ensure_ascii=False))
+        return 0
+    print(f"Runs: {st.runs_count} ({human_size(st.runs_bytes)})")
+    print(f"Proposals: {st.proposals_count} ({human_size(st.proposals_bytes)})")
+    print(f".governor total (approx): {human_size(st.governor_bytes)}")
+    return 0
+
+
+def _print_cleanup_result(result) -> None:
+    mode = "DRY-RUN" if result.dry_run else "APPLIED"
+    print(f"Cleanup {result.kind}: {mode}")
+    print(f"  Kept ({len(result.kept)}): {', '.join(result.kept[:5])}{'…' if len(result.kept) > 5 else ''}")
+    if result.removed:
+        print(f"  Remove ({len(result.removed)}): {', '.join(result.removed[:5])}{'…' if len(result.removed) > 5 else ''}")
+    else:
+        print("  Remove: (none)")
+    if not result.dry_run:
+        print(f"  Freed: {human_size(result.bytes_freed)}")
+
+
+def cmd_cleanup_runs(args: argparse.Namespace) -> int:
+    approve = args.approve and not args.dry_run
+    result = cleanup_runs(
+        _repo_path_from_args(args),
+        keep_last=args.keep_last,
+        approve=approve,
+    )
+    if args.as_json:
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        _print_cleanup_result(result)
+    return 0
+
+
+def cmd_cleanup_proposals(args: argparse.Namespace) -> int:
+    approve = args.approve and not args.dry_run
+    result = cleanup_proposals(
+        _repo_path_from_args(args),
+        keep_last=args.keep_last,
+        approve=approve,
+    )
+    if args.as_json:
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        _print_cleanup_result(result)
+    return 0
+
+
+def cmd_evaluate_run(args: argparse.Namespace) -> int:
+    try:
+        path, ev = evaluate_run(_repo_path_from_args(args), args.run_id)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(ev, indent=2, ensure_ascii=False))
+        return 0
+    print(f"Wrote {path}")
+    print(f"Friction: {ev.get('governor_friction_score')} | Success: {ev.get('run_success_score')}")
+    return 0
+
+
+def cmd_evaluate_show(args: argparse.Namespace) -> int:
+    ev = load_run_evaluation(_repo_path_from_args(args), args.run_id)
+    if not ev:
+        print("Error: no evaluation; run `governor evaluate run` first", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(ev, indent=2, ensure_ascii=False))
+        return 0
+    print(f"Run: {ev.get('run_id')}")
+    print(f"Outcome: {ev.get('outcome')} | Gate: {ev.get('gate_overall')} | Validator: {ev.get('validator_verdict')}")
+    print(f"Friction: {ev.get('governor_friction_score')} | Success: {ev.get('run_success_score')}")
+    print(f"Reviewer signal: {ev.get('reviewer_burden_reduction_signal')}")
+    return 0
+
+
+def cmd_evaluate_annotate(args: argparse.Namespace) -> int:
+    fields: dict[str, Any] = {}
+    if args.manual_rework_minutes is not None:
+        fields["manual_rework_minutes"] = args.manual_rework_minutes
+    if args.mr_outcome is not None:
+        fields["mr_outcome"] = args.mr_outcome
+    if args.post_run_defects_found:
+        fields["post_run_defects_found"] = True
+    if args.no_post_run_defects:
+        fields["post_run_defects_found"] = False
+    if args.defect_types is not None:
+        fields["defect_types"] = list(args.defect_types)
+    if args.reviewer_comments_count is not None:
+        fields["reviewer_comments_count"] = args.reviewer_comments_count
+    if args.lead_followup_questions_count is not None:
+        fields["lead_followup_questions_count"] = args.lead_followup_questions_count
+    if args.evidence_quality_score is not None:
+        fields["evidence_quality_score"] = args.evidence_quality_score
+    if args.reviewer_burden_score is not None:
+        fields["reviewer_burden_score"] = args.reviewer_burden_score
+    try:
+        ev = annotate_run(
+            _repo_path_from_args(args),
+            args.run_id,
+            note=args.note,
+            **fields,
+        )
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(ev, indent=2, ensure_ascii=False))
+        return 0
+    print(f"Annotated {args.run_id}")
+    print(f"Scores: friction={ev.get('governor_friction_score')} success={ev.get('run_success_score')}")
+    return 0
+
+
+def cmd_evaluate_export(args: argparse.Namespace) -> int:
+    path = export_evaluations(_repo_path_from_args(args), fmt=args.format)
+    print(path)
+    return 0
+
+
+def cmd_evaluate_summary(args: argparse.Namespace) -> int:
+    group_by = None
+    if args.by == "policy":
+        group_by = "policy"
+    elif args.by == "executor_profile":
+        group_by = "executor_profile"
+    elif args.by == "governor_provider":
+        group_by = "governor_provider"
+    summary = build_summary(_repo_path_from_args(args), group_by=group_by)
+    text = format_summary_text(summary)
+    if args.output:
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text, encoding="utf-8")
+        print(out_path)
+    elif args.as_json:
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+    else:
+        print(text)
+    return 0
+
+
+def cmd_diagnose(args: argparse.Namespace) -> int:
+    try:
+        result = diagnose_run(_repo_path_from_args(args), args.run_id)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        return 0
+    print(f"Run: {result.run_id}")
+    print(f"State: {result.state}")
+    if result.outcome:
+        print(f"Outcome: {result.outcome}")
+    print(f"Likely: {result.stuck_reason}")
+    if result.gate_overall:
+        print(f"Gate overall: {result.gate_overall}")
+    if result.plan_overall:
+        print(f"Plan overall: {result.plan_overall}")
+    print(f"Artifacts: executor={result.has_executor_output} validator={result.has_validator_output} "
+          f"report={result.has_final_report} evidence={result.has_evidence} review={result.has_review_package}")
+    if result.proposal_id:
+        print(f"Proposal ref: {result.proposal_id}")
+    for note in result.extra_notes:
+        print(f"Note: {note}")
+    print(f"Next: {result.next_command}")
+    return 0
+
+
 def cmd_config_path(args: argparse.Namespace) -> int:
     repo = resolve_repo_path(_repo_path_from_args(args))
     print(config_path(repo))
@@ -2004,6 +2300,27 @@ def main(argv: list[str] | None = None) -> int:
             "apply": cmd_governor_apply,
         }
         return gov_handlers[args.governor_cmd](args)
+    if args.command == "safety":
+        if args.safety_cmd == "audit":
+            return cmd_safety_audit(args)
+    if args.command == "cleanup":
+        cleanup_handlers = {
+            "status": cmd_cleanup_status,
+            "runs": cmd_cleanup_runs,
+            "proposals": cmd_cleanup_proposals,
+        }
+        return cleanup_handlers[args.cleanup_cmd](args)
+    if args.command == "diagnose":
+        return cmd_diagnose(args)
+    if args.command == "evaluate":
+        eval_handlers = {
+            "run": cmd_evaluate_run,
+            "show": cmd_evaluate_show,
+            "annotate": cmd_evaluate_annotate,
+            "export": cmd_evaluate_export,
+            "summary": cmd_evaluate_summary,
+        }
+        return eval_handlers[args.evaluate_cmd](args)
     return handlers[args.command](args)
 
 

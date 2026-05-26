@@ -11,11 +11,13 @@ from pathlib import Path
 from governor import __version__
 from governor.doctor import CheckResult
 from governor.gates import is_git_worktree
+from governor.repo_git import git_check_ignore, git_tracked_under_governor
 from governor.project_config import (
     PROJECT_CONFIG_FILENAME,
     project_config_path,
     validate_project_data,
 )
+from governor.safety_audit import run_safety_audit
 from governor.utils import resolve_repo_path
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -37,31 +39,6 @@ class CheckSummary:
                 for r in self.results
             ],
         }
-
-
-def _git_check_ignore(repo: Path, path: str) -> bool:
-    if not is_git_worktree(repo):
-        return False
-    proc = subprocess.run(
-        ["git", "check-ignore", "-q", path],
-        cwd=repo,
-        capture_output=True,
-    )
-    return proc.returncode == 0
-
-
-def _git_tracked_under_governor(repo: Path) -> list[str]:
-    if not is_git_worktree(repo):
-        return []
-    proc = subprocess.run(
-        ["git", "ls-files", ".governor"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        return []
-    return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
 
 
 def _check_version() -> CheckResult:
@@ -111,7 +88,7 @@ def _check_governor_gitignored(repo: Path) -> CheckResult:
             "not a git repo — cannot verify ignore",
         )
     for candidate in (".governor/", ".governor", ".governor/config.json"):
-        if _git_check_ignore(repo, candidate):
+        if git_check_ignore(repo, candidate):
             return CheckResult("governor_gitignored", "OK", f"{candidate} is gitignored")
     if rule_ok:
         return CheckResult(
@@ -127,7 +104,7 @@ def _check_governor_gitignored(repo: Path) -> CheckResult:
 
 
 def _check_governor_not_tracked(repo: Path) -> CheckResult:
-    tracked = _git_tracked_under_governor(repo)
+    tracked = git_tracked_under_governor(repo)
     if not tracked:
         return CheckResult("governor_not_tracked", "OK", "no tracked files under .governor/")
     sample = ", ".join(tracked[:5])
@@ -205,8 +182,13 @@ def run_check(
         _check_project_config(repo),
         _check_governor_gitignored(repo),
         _check_governor_not_tracked(repo),
-        _check_pytest(repo),
     ]
+    safety = run_safety_audit(repo)
+    for r in safety.results:
+        if r.name in ("governor_gitignored", "governor_not_tracked", "project_config"):
+            continue
+        results.append(r)
+    results.append(_check_pytest(repo))
     if run_smoke:
         results.extend(_check_smoke_scripts())
 

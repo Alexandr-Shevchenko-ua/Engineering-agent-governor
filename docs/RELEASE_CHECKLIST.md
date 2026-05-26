@@ -30,6 +30,10 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 - [ ] `python scripts/smoke_chatbang_advisor_workflow.py` — CHATBANG ADVISOR SMOKE OK
 - [ ] `python scripts/smoke_chatbang_governor_mode_workflow.py` — CHATBANG GOVERNOR MODE SMOKE OK
 - [ ] `python scripts/smoke_cursor_governor_provider_workflow.py` — CURSOR GOVERNOR PROVIDER SMOKE OK
+- [ ] `python -m governor safety audit --repo-path .` — PASS
+- [ ] `python scripts/smoke_stabilization_workflow.py` — STABILIZATION SMOKE OK
+- [ ] `python scripts/smoke_evaluation_workflow.py` — EVALUATION SMOKE OK
+- [ ] `python -m governor evaluate summary --repo-path .` (after dogfood runs, optional)
 - [ ] `python scripts/cursor_governor_provider_local_check.py` — OK or WARN (no `--require` unless local profile ready)
 - [ ] `python -m governor run start --help`
 - [ ] `python -m governor policy list` / `policy show --policy bugfix`

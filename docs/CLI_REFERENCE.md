@@ -54,9 +54,76 @@ python -m governor check --repo-path . --json
 | `--json` | Machine-readable summary |
 | `--repo-path` | Repo to validate `governor.project.json` and git ignore rules |
 
-**Checks:** version · project config (if present) · `.governor` gitignored · no tracked `.governor` · `pytest tests/` (if `tests/` exists) · optional smokes
+**Checks:** version · project config · `.governor` gitignored · safety-audit items (profiles, `.claude`) · `pytest tests/` · optional smokes
 
 **Exit:** `0` if no FAIL checks, else `1`
+
+---
+
+## safety audit
+
+Read-only safety and local-config audit (no pytest, no smokes).
+
+```bash
+python -m governor safety audit --repo-path .
+python -m governor safety audit --repo-path . --json
+```
+
+**Exit:** `0` if no FAIL, else `1`
+
+---
+
+## cleanup
+
+Local `.governor` retention for `runs/` and `proposals/` only. Default is **dry-run**; use `--approve` to delete.
+
+```bash
+python -m governor cleanup status --repo-path .
+python -m governor cleanup runs --repo-path . --keep-last 20 --dry-run
+python -m governor cleanup runs --repo-path . --keep-last 20 --approve
+python -m governor cleanup proposals --repo-path . --keep-last 20 --approve
+```
+
+Never touches git-tracked files.
+
+---
+
+## diagnose
+
+Read-only hints for a stuck or completed run.
+
+```bash
+python -m governor diagnose --run-id <run-id> --repo-path .
+```
+
+Use the **folder name** under `.governor/runs/`, not a filesystem path.
+
+---
+
+## evaluate
+
+Local run evaluation metrics (no web UI, no LLM scoring). See [EVALUATION_METRICS.md](EVALUATION_METRICS.md).
+
+```bash
+python -m governor evaluate run --run-id <run-id> --repo-path .
+python -m governor evaluate show --run-id <run-id> --repo-path .
+python -m governor evaluate annotate --run-id <run-id> --repo-path . \
+  --manual-rework-minutes 5 --mr-outcome accepted
+python -m governor evaluate export --repo-path . --format csv
+python -m governor evaluate summary --repo-path .
+python -m governor evaluate summary --repo-path . --by policy
+python -m governor evaluate summary --repo-path . --by executor_profile \
+  --output .governor/evaluations/dashboard.md
+```
+
+| Subcommand | Writes |
+|------------|--------|
+| `run` | `17_run_evaluation.json`, `17_run_evaluation.md`, upserts `evaluations.jsonl` |
+| `annotate` | Updates manual fields + recomputes scores |
+| `export` | `evaluations.csv` / `.md` / jsonl |
+| `summary` | Table to stdout or `--output` markdown |
+
+**Safety:** read-only on the repo except `.governor/evaluations/` and per-run `17_*` artifacts.
 
 ---
 
@@ -353,7 +420,16 @@ See [CHATBANG_GOVERNOR_ADVISOR.md](CHATBANG_GOVERNOR_ADVISOR.md).
 
 ---
 
-## governor (experimental — Governor Mode)
+## governor (Governor Mode — proposals)
+
+**Not the same as execution:**
+
+| Command | Purpose |
+|---------|---------|
+| `governor propose` | **New task** → proposal under `.governor/proposals/` |
+| `advisor ask` | **Existing run** → guidance only (`16_advisor_*.md`) |
+| `dispatch` / `run resume` | **Execute** with executor profile (may modify repo) |
+| `--provider cursor-auto` | Read-only Cursor **planner** — not an executor |
 
 Providers propose a bounded run; Governor validates; human `--approve` apply. **Does not** execute repo changes on propose/apply.
 
