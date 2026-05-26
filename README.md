@@ -1,6 +1,6 @@
 # Engineering Agent Governor
 
-**v1.4.0** — local control plane (Cursor Headless executor, Chatbang Governor Advisor, **Governor Mode** with chatbang and **Cursor Governor Provider** `cursor-auto`, **run evaluation metrics**) for agent-delegated engineering: auditable runs, gates, plans, evidence, review packages, and local success/friction scoring. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
+**v1.5.0 Dashboard Lite** — local control plane (Cursor Headless executor, Chatbang Governor Advisor, **Governor Mode** with chatbang and **Cursor Governor Provider** `cursor-auto`, **run evaluation metrics**, **static evaluation dashboard**) for agent-delegated engineering: auditable runs, gates, plans, evidence, review packages, and local success/friction scoring. Governor orchestrates **your** tools and **your** agents; it is not an agent itself.
 
 ## Not autopilot
 
@@ -43,9 +43,10 @@ python -m governor safety audit --repo-path .
 python -m governor diagnose --run-id <run-id> --repo-path .
 python -m governor cleanup status --repo-path .
 python -m governor evaluate run --run-id <run-id> --repo-path .
+python -m governor evaluate dashboard --repo-path . --format both
 ```
 
-Success is measured by **lower manual rework and reviewer burden**, not by lines changed — see [docs/EVALUATION_METRICS.md](docs/EVALUATION_METRICS.md).
+Success is measured by **lower manual rework and reviewer burden**, not by lines changed — see [docs/EVALUATION_METRICS.md](docs/EVALUATION_METRICS.md) and [docs/EVALUATION_DASHBOARD.md](docs/EVALUATION_DASHBOARD.md).
 
 ## Quick workflows
 

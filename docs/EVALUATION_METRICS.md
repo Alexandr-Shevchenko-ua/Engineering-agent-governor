@@ -1,8 +1,12 @@
-# Run evaluation metrics (v1.4.1)
+# Run evaluation metrics (v1.5.0)
 
 Governor v1.4 adds a **local metrics layer** to measure whether governed runs reduce manual chaos, rework, and reviewer burden — not whether an agent merely produced more output.
 
-**v1.4.1** improves metric accuracy (gate WARN accounting, human decision counting, flag parsing, active execution windows). Read `17_run_evaluation.md` per run for the structured summary.
+**v1.4.1** improves metric accuracy (gate WARN accounting, human decision counting, flag parsing, active execution windows).
+
+**v1.5.0** adds **Dashboard Lite** — static `dashboard.md` / `dashboard.html` from `evaluations.jsonl`. See [EVALUATION_DASHBOARD.md](EVALUATION_DASHBOARD.md).
+
+Read `17_run_evaluation.md` per run for the structured summary.
 
 ## What success means
 
@@ -30,7 +34,9 @@ Exports (via CLI):
 
 - `.governor/evaluations/evaluations.csv`
 - `.governor/evaluations/evaluations.md`
-- Optional dashboard: `governor evaluate summary --output .governor/evaluations/dashboard.md`
+- Dashboard (v1.5): `governor evaluate dashboard --repo-path . --format both`
+  - `.governor/evaluations/dashboard.md`
+  - `.governor/evaluations/dashboard.html`
 
 ## Automatic vs manual metrics
 

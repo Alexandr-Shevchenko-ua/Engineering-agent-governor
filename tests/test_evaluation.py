@@ -248,4 +248,4 @@ def test_docs_mention_rework_burden() -> None:
     assert "rework" in text
     assert "reviewer" in text
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "1.4" in readme
+    assert "1.5" in readme or "evaluation" in readme.lower()

@@ -112,8 +112,9 @@ python -m governor evaluate annotate --run-id <run-id> --repo-path . \
 python -m governor evaluate export --repo-path . --format csv
 python -m governor evaluate summary --repo-path .
 python -m governor evaluate summary --repo-path . --by policy
-python -m governor evaluate summary --repo-path . --by executor_profile \
-  --output .governor/evaluations/dashboard.md
+python -m governor evaluate summary --repo-path . --by executor_profile
+python -m governor evaluate dashboard --repo-path . --format both
+python -m governor evaluate dashboard --repo-path . --format markdown --include-smokes
 ```
 
 | Subcommand | Writes |
@@ -122,8 +123,11 @@ python -m governor evaluate summary --repo-path . --by executor_profile \
 | `annotate` | Updates manual fields + recomputes scores |
 | `export` | `evaluations.csv` / `.md` / jsonl |
 | `summary` | Table to stdout or `--output` markdown |
+| `dashboard` | `dashboard.md` and/or `dashboard.html` (static, no server) |
 
-**Safety:** read-only on the repo except `.governor/evaluations/` and per-run `17_*` artifacts.
+**Dashboard options:** `--format markdown|html|both` (default `both`), `--include-smokes`, `--no-include-unknown`, `--min-runs`, `--top`, `--by`, `--json`.
+
+**Safety:** read-only on the repo except `.governor/evaluations/` and per-run `17_*` artifacts. Dashboard does not re-run `evaluate run`.
 
 ---
 

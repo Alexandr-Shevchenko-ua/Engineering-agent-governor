@@ -97,6 +97,7 @@ from governor.evaluation import (
     format_summary_text,
     load_run_evaluation,
 )
+from governor.evaluation_dashboard import NO_EVALUATIONS_MSG, generate_dashboard
 from governor.safety_audit import run_safety_audit, safety_audit_exit_code
 from governor.run_store import init_store, open_store
 from governor.trace import TraceLogger
@@ -246,9 +247,56 @@ def _build_parser() -> argparse.ArgumentParser:
     p_eval_summary.add_argument(
         "--output",
         default=None,
-        help="Write dashboard markdown (default: print to stdout)",
+        help="Write summary markdown to file (default: print to stdout)",
     )
     p_eval_summary.add_argument("--json", action="store_true", dest="as_json")
+    p_eval_dashboard = eval_sub.add_parser(
+        "dashboard",
+        help="Generate static evaluation dashboard (markdown and/or HTML)",
+        parents=[parent],
+    )
+    p_eval_dashboard.add_argument(
+        "--format",
+        choices=["markdown", "html", "both"],
+        default="both",
+    )
+    p_eval_dashboard.add_argument(
+        "--output",
+        default=None,
+        help="Output file path (single format only; both uses default paths)",
+    )
+    p_eval_dashboard.add_argument(
+        "--include-smokes",
+        action="store_true",
+        default=False,
+        help="Include smoke_or_unknown cohort in dashboard view",
+    )
+    p_eval_dashboard.add_argument(
+        "--include-unknown",
+        action="store_true",
+        default=True,
+        help="Include runs with mr_outcome unknown (default: true)",
+    )
+    p_eval_dashboard.add_argument(
+        "--no-include-unknown",
+        action="store_false",
+        dest="include_unknown",
+        help="Exclude mr_outcome unknown from dashboard view",
+    )
+    p_eval_dashboard.add_argument(
+        "--by",
+        choices=["policy", "executor_profile", "governor_provider"],
+        default=None,
+        help="Optional focus group for extra breakdown",
+    )
+    p_eval_dashboard.add_argument(
+        "--min-runs",
+        type=int,
+        default=5,
+        help="Warn when dashboard view has fewer than N runs",
+    )
+    p_eval_dashboard.add_argument("--top", type=int, default=5, help="Worst/best list size")
+    p_eval_dashboard.add_argument("--json", action="store_true", dest="as_json")
 
     p_init = sub.add_parser("init", help="Create a new governor run", parents=[parent])
     p_init.add_argument("--task", required=True, help="Task title / objective")
@@ -2179,6 +2227,47 @@ def cmd_evaluate_summary(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_evaluate_dashboard(args: argparse.Namespace) -> int:
+    out = Path(args.output) if args.output else None
+    if args.format == "both" and out is not None:
+        print(
+            "Warning: --output ignored when --format both; "
+            "using .governor/evaluations/dashboard.{md,html}",
+            file=sys.stderr,
+        )
+        out = None
+    try:
+        result = generate_dashboard(
+            _repo_path_from_args(args),
+            fmt=args.format,
+            output=out,
+            include_smokes=args.include_smokes,
+            include_unknown=args.include_unknown,
+            min_runs=args.min_runs,
+            top_n=args.top,
+        )
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    summary = result.summary
+    if args.by:
+        key_map = {
+            "policy": "by_policy",
+            "executor_profile": "by_executor",
+            "governor_provider": "by_provider",
+        }
+        summary["focus_by"] = args.by
+        summary["focus_groups"] = summary.get(key_map[args.by], {})
+    if args.as_json:
+        export = {k: v for k, v in summary.items() if not str(k).startswith("_")}
+        print(json.dumps(export, indent=2, ensure_ascii=False))
+    if result.markdown_path:
+        print(result.markdown_path)
+    if result.html_path:
+        print(result.html_path)
+    return 0
+
+
 def cmd_diagnose(args: argparse.Namespace) -> int:
     try:
         result = diagnose_run(_repo_path_from_args(args), args.run_id)
@@ -2319,6 +2408,7 @@ def main(argv: list[str] | None = None) -> int:
             "annotate": cmd_evaluate_annotate,
             "export": cmd_evaluate_export,
             "summary": cmd_evaluate_summary,
+            "dashboard": cmd_evaluate_dashboard,
         }
         return eval_handlers[args.evaluate_cmd](args)
     return handlers[args.command](args)

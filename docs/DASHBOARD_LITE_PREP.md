@@ -72,16 +72,17 @@ Use these labels in dashboard groupings — compare **within cohort**, not acros
 3. Do not average smokes with full closures without cohort filters.
 4. `gate_overall` WARN may be profile compliance while sub-checks are PASS.
 
-## v1.5 implementation scope (next)
-
-Planned CLI (not yet implemented):
+## Generate dashboard (v1.5+)
 
 ```bash
-python -m governor evaluate dashboard --repo-path .
-# optional: --output .governor/evaluations/dashboard.md
+python -m governor evaluate dashboard --repo-path . --format both
+# markdown only:
+python -m governor evaluate dashboard --repo-path . --format markdown
+# include smoke/unknown cohort in aggregates:
+python -m governor evaluate dashboard --repo-path . --include-smokes
 ```
 
-Outputs: cohort tables, annotated vs auto-only split, MR outcome breakdown, friction/success distributions — **markdown only**, no HTTP.
+Defaults: `.governor/evaluations/dashboard.md` and `dashboard.html` (gitignored). See [EVALUATION_DASHBOARD.md](EVALUATION_DASHBOARD.md).
 
 ## Related docs
 

@@ -19,7 +19,7 @@ def test_version_exits_zero():
 
 
 def test_version_string():
-    assert __version__ == "1.4.1"
+    assert __version__ == "1.5.0"
 
 
 def test_status_repo_path_after_subcommand():
