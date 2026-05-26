@@ -33,6 +33,7 @@ Use before tagging a release. **Do not create tags automatically** from this doc
 - [ ] `python -m governor safety audit --repo-path .` — PASS
 - [ ] `python scripts/smoke_stabilization_workflow.py` — STABILIZATION SMOKE OK
 - [ ] `python scripts/smoke_evaluation_workflow.py` — EVALUATION SMOKE OK
+- [ ] `python scripts/smoke_evaluation_accuracy_workflow.py` — EVALUATION ACCURACY SMOKE OK
 - [ ] `python -m governor evaluate summary --repo-path .` (after dogfood runs, optional)
 - [ ] `python scripts/cursor_governor_provider_local_check.py` — OK or WARN (no `--require` unless local profile ready)
 - [ ] `python -m governor run start --help`

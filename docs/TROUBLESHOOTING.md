@@ -100,6 +100,32 @@ python -m governor safety audit --repo-path .
 
 Governor refuses argv that look like tokens. Use environment auth; never commit `.governor/config.json`.
 
+## Evaluation metrics (v1.4.1)
+
+### `gate_warn_count` is 0 but gate overall is WARN
+
+Check `gate_profile_compliance_status` in `08_gate_results.json`. Overall WARN often comes from **profile compliance** while every named sub-check is still PASS. Re-run:
+
+```bash
+python -m governor evaluate run --run-id <id> --repo-path .
+```
+
+Read `17_run_evaluation.md` § Gate summary.
+
+### Friction score still looks high
+
+`human_decision_count` (not `commands_executed_count`) drives friction. Status/show/diagnose/evaluate export are excluded. Re-evaluate after v1.4.1+.
+
+### `blocked_time_seconds` is huge
+
+Calendar span includes human idle time before `plan resume`. Prefer **`active_execution_seconds`** and **`human_gap_before_resume_seconds`** in `17_run_evaluation.md`.
+
+### fake-validator PASS in evaluation
+
+Harness success only. Use a real validator profile for production signals; the evaluation markdown includes a caveat when `validator_profile=fake-validator`.
+
+See [EVALUATION_METRICS.md](EVALUATION_METRICS.md).
+
 ## Stuck run?
 
 ```bash

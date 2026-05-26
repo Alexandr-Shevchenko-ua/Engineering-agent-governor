@@ -16,20 +16,20 @@ from governor.project_config import default_project_config_dict
 
 
 def test_version_string():
-    assert __version__ == "1.4.0"
+    assert __version__ == "1.4.1"
 
 
 def test_version_command_text(capsys):
     assert main(["version"]) == 0
     out = capsys.readouterr().out
-    assert "1.4.0" in out
+    assert "1.4.1" in out
     assert "Python" in out
 
 
 def test_version_command_json(capsys):
     assert main(["version", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert data["version"] == "1.4.0"
+    assert data["version"] == "1.4.1"
     assert data["package"] == "engineering-agent-governor"
     assert "python_version" in data
     assert "platform" in data

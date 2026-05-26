@@ -41,12 +41,55 @@ MR_OUTCOMES = frozenset(
 )
 
 _DURATION_RE = re.compile(r"duration=([\d.]+)s", re.IGNORECASE)
-_SENSITIVE_PATH_MARKERS = (
-    ".env",
-    "secret",
-    "credentials",
-    "config.json",
-    ".governor/",
+
+_PLAN_START_ACTIONS = frozenset({"plan_execute_start", "plan_resume_start"})
+_PLAN_STOP_ACTIONS = frozenset({"plan_execute_stop", "plan_resume_stop"})
+
+# Flags counted from commands_executed and trace reasons (v1.4.1).
+_FORCE_LIKE_FLAGS = (
+    "--force",
+    "--force-unstructured",
+)
+_REPLACE_FLAGS = ("--replace",)
+_SAFETY_OVERRIDE_FLAGS = (
+    "--allow-disabled-profile",
+    "--allow-write-capable-governor-provider",
+    "--accept-failed-output",
+)
+
+# Commands that are not human decisions (read-only / housekeeping).
+_NON_DECISION_SUBSTRINGS = (
+    "governor status",
+    "governor list",
+    "governor show",
+    "governor diagnose",
+    "governor cleanup",
+    "governor doctor",
+    "evaluate show",
+    "evaluate export",
+    "evaluate summary",
+    "evaluate run",
+    "safety audit",
+    "config show",
+    "project show",
+    "project validate",
+    "project path",
+)
+
+_DECISION_SUBSTRINGS = (
+    "governor apply",
+    "plan resume",
+    "plan execute",
+    " dispatch ",
+    " record ",
+    "checkpoint",
+    "evaluate annotate",
+    "repair prepare",
+    " repair ",
+    "governor gate",
+    "governor report",
+    "governor dispatch",
+    "governor record",
 )
 
 
@@ -108,14 +151,114 @@ def _count_repair_prompts(run_dir: Path) -> int:
     return len(list(run_dir.glob("11_repair_prompt_*.md")))
 
 
+def _is_comment_command(cmd: str) -> bool:
+    s = cmd.strip()
+    return not s or s.startswith("#")
+
+
+def _count_flags_in_text(text: str) -> dict[str, int]:
+    low = text.lower()
+    force_like = sum(1 for f in _FORCE_LIKE_FLAGS if f in low)
+    replace = sum(1 for f in _REPLACE_FLAGS if f in low)
+    safety = sum(1 for f in _SAFETY_OVERRIDE_FLAGS if f in low)
+    return {
+        "force_like": force_like,
+        "replace": replace,
+        "safety_override": safety,
+    }
+
+
+def _aggregate_flag_counts(*parts: dict[str, int]) -> dict[str, int]:
+    out = {"force_like": 0, "replace": 0, "safety_override": 0}
+    for p in parts:
+        for k in out:
+            out[k] += int(p.get(k, 0))
+    return out
+
+
+def _flag_metrics(commands: list[str], events: list[dict[str, Any]]) -> dict[str, int]:
+    totals = {"force_like": 0, "replace": 0, "safety_override": 0}
+    for cmd in commands:
+        if _is_comment_command(cmd):
+            continue
+        part = _count_flags_in_text(cmd)
+        for k in totals:
+            totals[k] += part[k]
+    for ev in events:
+        reason = str(ev.get("reason") or "")
+        part = _count_flags_in_text(reason)
+        for k in totals:
+            totals[k] += part[k]
+    return totals
+
+
+def _human_command_metrics(commands: list[str]) -> dict[str, int]:
+    executed = [c for c in commands if not _is_comment_command(c)]
+    human_decisions = 0
+    manual_steps = 0
+    for cmd in executed:
+        low = cmd.lower()
+        if any(pat in low for pat in _NON_DECISION_SUBSTRINGS):
+            continue
+        is_decision = any(pat in low for pat in _DECISION_SUBSTRINGS) or " --approve" in low
+        if is_decision:
+            human_decisions += 1
+            manual_steps += 1
+    return {
+        "commands_executed_count": len(executed),
+        "human_decision_count": human_decisions,
+        "manual_step_count": manual_steps,
+    }
+
+
+def _plan_execution_timing(
+    events: list[dict[str, Any]],
+    created_at: str | None,
+) -> dict[str, Any]:
+    windows: list[tuple[str, str]] = []
+    open_start: str | None = None
+    first_resume_at: str | None = None
+    last_plan_execution_at: str | None = None
+
+    for ev in events:
+        action = str(ev.get("action") or "")
+        ts = ev.get("ts")
+        if not ts:
+            continue
+        if action in _PLAN_START_ACTIONS:
+            if action == "plan_resume_start" and first_resume_at is None:
+                first_resume_at = ts
+            open_start = ts
+        elif action in _PLAN_STOP_ACTIONS and open_start:
+            windows.append((open_start, ts))
+            last_plan_execution_at = ts
+            open_start = None
+
+    active_total = 0.0
+    for start_ts, stop_ts in windows:
+        sec = _seconds_between(start_ts, stop_ts)
+        if sec is not None:
+            active_total += sec
+
+    human_gap: float | None = None
+    if first_resume_at and created_at:
+        human_gap = _seconds_between(created_at, first_resume_at)
+
+    return {
+        "first_resume_at": first_resume_at,
+        "last_plan_execution_at": last_plan_execution_at,
+        "active_execution_seconds": round(active_total, 2) if windows else None,
+        "human_gap_before_resume_seconds": round(human_gap, 2) if human_gap is not None else None,
+        "plan_execution_window_count": len(windows),
+    }
+
+
 def _trace_metrics(run_dir: Path, run_id: str) -> dict[str, Any]:
     events = TraceLogger(run_dir, run_id).read_all()
     advisor_calls = _count_advisor_artifacts(run_dir)
     checkpoint_count = 0
     repair_loops = _count_repair_prompts(run_dir)
     failed_dispatch = 0
-    force_flags = 0
-    replace_flags = 0
     agent_runtime = 0.0
     first_executor_ts: str | None = None
     first_gate_ts: str | None = None
@@ -136,10 +279,6 @@ def _trace_metrics(run_dir: Path, run_id: str) -> dict[str, Any]:
             repair_loops = max(repair_loops, _count_repair_prompts(run_dir))
         if phase == "dispatch" and status == "fail":
             failed_dispatch += 1
-        if "force" in reason:
-            force_flags += 1
-        if "replace" in reason:
-            replace_flags += 1
         m = _DURATION_RE.search(str(ev.get("reason") or ""))
         if m and phase == "dispatch":
             agent_runtime += float(m.group(1))
@@ -156,12 +295,11 @@ def _trace_metrics(run_dir: Path, run_id: str) -> dict[str, Any]:
         "checkpoint_count": checkpoint_count,
         "repair_loops_count": repair_loops,
         "failed_dispatch_count": failed_dispatch,
-        "force_flags_count": force_flags,
-        "replace_flags_count": replace_flags,
         "agent_runtime_total_seconds": round(agent_runtime, 2),
         "first_executor_ts": first_executor_ts,
         "first_gate_ts": first_gate_ts,
         "first_report_ts": first_report_ts,
+        "_trace_events": events,
     }
 
 
@@ -170,6 +308,17 @@ def _gate_metrics(run_dir: Path) -> dict[str, Any]:
     results = data.get("results") or []
     fail_c = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "FAIL")
     warn_c = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "WARN")
+    profile_compliance = data.get("profile_compliance")
+    profile_status = str(profile_compliance).upper() if profile_compliance is not None else None
+    profile_compliance_warn_count = (
+        1 if profile_status == "WARN" else 0
+    )
+    gate_overall = data.get("overall")
+    gate_overall_is_warn = str(gate_overall or "").upper() == "WARN"
+    profile_reason = data.get("profile_compliance_reason")
+    if profile_reason is None and profile_compliance is not None:
+        profile_reason = f"profile_compliance={profile_compliance}"
+    combined_warn_count = warn_c + profile_compliance_warn_count
     diff_budget_exceeded = False
     tests_passed: bool | None = None
     tests_failed: bool | None = None
@@ -196,9 +345,14 @@ def _gate_metrics(run_dir: Path) -> dict[str, Any]:
     if isinstance(added, int) and isinstance(deleted, int):
         total_lines = added + deleted
     return {
-        "gate_overall": data.get("overall"),
+        "gate_overall": gate_overall,
+        "gate_overall_is_warn": gate_overall_is_warn,
+        "gate_profile_compliance_status": profile_compliance,
+        "gate_profile_compliance_reason": profile_reason,
+        "profile_compliance_warn_count": profile_compliance_warn_count,
         "gate_fail_count": fail_c,
-        "gate_warn_count": warn_c,
+        "gate_warn_count": combined_warn_count,
+        "gate_subcheck_warn_count": warn_c,
         "changed_files_count": changed,
         "diff_lines_added": added,
         "diff_lines_deleted": deleted,
@@ -251,12 +405,19 @@ def _evidence_completeness(run_dir: Path) -> int:
 
 
 def compute_scores(ev: dict[str, Any]) -> dict[str, float]:
+    human_decisions = int(
+        ev.get("human_decision_count")
+        if ev.get("human_decision_count") is not None
+        else ev.get("human_interventions_count")
+        or 0
+    )
     friction = (
-        int(ev.get("human_interventions_count") or 0) * 5
+        human_decisions * 5
         + int(ev.get("repair_loops_count") or 0) * 10
         + int(ev.get("failed_dispatch_count") or 0) * 15
-        + int(ev.get("force_flags_count") or 0) * 8
+        + int(ev.get("force_like_flags_count") or ev.get("force_flags_count") or 0) * 8
         + int(ev.get("replace_flags_count") or 0) * 5
+        + int(ev.get("safety_override_flags_count") or 0) * 15
         + int(ev.get("checkpoint_count") or 0) * 5
         + int(ev.get("manual_rework_minutes") or 0) * 2
     )
@@ -333,15 +494,26 @@ def _default_evaluation() -> dict[str, Any]:
         "time_to_final_report_seconds": None,
         "total_runtime_seconds": None,
         "blocked_time_seconds": None,
+        "blocked_time_seconds_approximate": True,
         "agent_runtime_total_seconds": None,
+        "first_resume_at": None,
+        "last_plan_execution_at": None,
+        "active_execution_seconds": None,
+        "human_gap_before_resume_seconds": None,
+        "plan_execution_window_count": 0,
+        "commands_executed_count": 0,
+        "human_decision_count": 0,
+        "manual_step_count": 0,
         "human_interventions_count": 0,
         "manual_commands_count": 0,
         "checkpoint_count": 0,
         "advisor_calls_count": 0,
         "proposal_rejections_count": 0,
         "repair_loops_count": 0,
+        "force_like_flags_count": 0,
         "force_flags_count": 0,
         "replace_flags_count": 0,
+        "safety_override_flags_count": 0,
         "failed_dispatch_count": 0,
         "changed_files_count": None,
         "diff_lines_added": None,
@@ -350,8 +522,13 @@ def _default_evaluation() -> dict[str, Any]:
         "diff_budget_exceeded": False,
         "sensitive_paths_touched": [],
         "gate_overall": None,
+        "gate_overall_is_warn": False,
+        "gate_profile_compliance_status": None,
+        "gate_profile_compliance_reason": None,
+        "profile_compliance_warn_count": 0,
         "gate_fail_count": 0,
         "gate_warn_count": 0,
+        "gate_subcheck_warn_count": 0,
         "tests_passed": None,
         "tests_failed": None,
         "validator_verdict": None,
@@ -396,22 +573,15 @@ def extract_run_evaluation(repo_path: Path, run_id: str) -> dict[str, Any]:
     ev["created_at"] = meta.created_at
     ev["final_state"] = meta.state
     ev["outcome"] = meta.outcome
-    ev["manual_commands_count"] = len(meta.commands_executed or [])
-    ev["human_interventions_count"] = (
-        len(meta.commands_executed or [])
-        + int(getattr(meta, "repair_count", 0) or 0)
-    )
+    cmd_metrics = _human_command_metrics(meta.commands_executed or [])
+    ev.update(cmd_metrics)
+    ev["manual_commands_count"] = cmd_metrics["commands_executed_count"]
+    ev["human_interventions_count"] = cmd_metrics["human_decision_count"]
     ev["repair_loops_count"] = max(
         ev.get("repair_loops_count") or 0,
         int(getattr(meta, "repair_count", 0) or 0),
         int(getattr(meta, "repair_prompt_count", 0) or 0),
     )
-    for cmd in meta.commands_executed or []:
-        low = cmd.lower()
-        if "--force" in low or "force-unstructured" in low:
-            ev["force_flags_count"] = int(ev.get("force_flags_count") or 0) + 1
-        if "--replace" in low:
-            ev["replace_flags_count"] = int(ev.get("replace_flags_count") or 0) + 1
 
     proj_path = project_config_path(repo)
     if proj_path.is_file():
@@ -434,7 +604,17 @@ def extract_run_evaluation(repo_path: Path, run_id: str) -> dict[str, Any]:
             pass
 
     trace_m = _trace_metrics(run_dir, rid)
+    trace_events = trace_m.pop("_trace_events", [])
     ev.update({k: trace_m[k] for k in trace_m if k in ev})
+
+    flag_totals = _flag_metrics(meta.commands_executed or [], trace_events)
+    ev["force_like_flags_count"] = flag_totals["force_like"]
+    ev["replace_flags_count"] = flag_totals["replace"]
+    ev["safety_override_flags_count"] = flag_totals["safety_override"]
+    ev["force_flags_count"] = flag_totals["force_like"]
+
+    plan_timing = _plan_execution_timing(trace_events, meta.created_at)
+    ev.update({k: plan_timing[k] for k in plan_timing if k in ev})
 
     gate_m = _gate_metrics(run_dir)
     ev.update({k: gate_m[k] for k in gate_m if k in ev})
@@ -467,7 +647,14 @@ def extract_run_evaluation(repo_path: Path, run_id: str) -> dict[str, Any]:
     ev["total_runtime_seconds"] = _seconds_between(created, meta.updated_at)
     agent_rt = float(ev.get("agent_runtime_total_seconds") or 0)
     total_rt = float(ev.get("total_runtime_seconds") or 0)
-    ev["blocked_time_seconds"] = round(max(0.0, total_rt - agent_rt), 2) if total_rt else None
+    active_rt = ev.get("active_execution_seconds")
+    if active_rt is not None and float(active_rt) > 0:
+        ev["blocked_time_seconds"] = round(
+            max(0.0, total_rt - float(active_rt)), 2
+        ) if total_rt else None
+    else:
+        ev["blocked_time_seconds"] = round(max(0.0, total_rt - agent_rt), 2) if total_rt else None
+    ev["blocked_time_seconds_approximate"] = True
 
     ev["evidence_completeness_score"] = _evidence_completeness(run_dir)
     ev["evaluated_at"] = utc_now_iso()
@@ -501,27 +688,74 @@ def _merge_manual_fields(existing: dict[str, Any], new_auto: dict[str, Any]) -> 
 
 
 def render_evaluation_markdown(ev: dict[str, Any]) -> str:
+    gate_lines = [
+        f"- **Gate overall:** {ev.get('gate_overall')}"
+        + (" (WARN)" if ev.get("gate_overall_is_warn") else ""),
+        f"- Sub-check WARN count: {ev.get('gate_subcheck_warn_count')}",
+        f"- Profile compliance: {ev.get('gate_profile_compliance_status')}",
+    ]
+    if ev.get("gate_profile_compliance_reason"):
+        gate_lines.append(f"- Profile compliance note: {ev.get('gate_profile_compliance_reason')}")
+    if ev.get("gate_overall_is_warn") and int(ev.get("gate_subcheck_warn_count") or 0) == 0:
+        gate_lines.append(
+            "- **Note:** overall WARN may come from profile compliance even when all named sub-checks passed."
+        )
+
+    validator_profile = str(ev.get("validator_profile") or "")
+    validator_lines = [f"- **Validator verdict:** {ev.get('validator_verdict')}"]
+    if "fake-validator" in validator_profile.lower() or validator_profile == "fake-validator":
+        validator_lines.append(
+            "- **Caveat:** fake-validator PASS is harness success, not production-quality validation."
+        )
+
     lines = [
         f"# Run evaluation `{ev.get('run_id')}`",
         "",
         f"- **Evaluated:** {ev.get('evaluated_at')}",
-        f"- **Outcome:** {ev.get('outcome')} · **Gate:** {ev.get('gate_overall')}",
-        f"- **Validator:** {ev.get('validator_verdict')}",
+        f"- **Outcome:** {ev.get('outcome')} · **Task category:** {ev.get('task_category')}",
         "",
         "## Scores",
         "",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Governor friction | {ev.get('governor_friction_score')} (lower is better) |",
         f"| Run success | {ev.get('run_success_score')} |",
         f"| Reviewer burden reduction | {ev.get('reviewer_burden_reduction_signal')} |",
         "",
-        "## Flow",
+        "## Calendar timing",
         "",
-        f"- Total runtime: {ev.get('total_runtime_seconds')}s",
-        f"- Agent runtime: {ev.get('agent_runtime_total_seconds')}s",
-        f"- Human interventions: {ev.get('human_interventions_count')}",
+        f"- Total runtime (created → updated): {ev.get('total_runtime_seconds')}s",
+        f"- Time to first executor output: {ev.get('time_to_first_executor_output_seconds')}s",
+        f"- Human gap before first plan resume: {ev.get('human_gap_before_resume_seconds')}s",
+        f"- Blocked/idle time (approximate): {ev.get('blocked_time_seconds')}s",
+        "",
+        "## Active execution timing",
+        "",
+        f"- First resume at: {ev.get('first_resume_at')}",
+        f"- Last plan execution at: {ev.get('last_plan_execution_at')}",
+        f"- Active execution windows: {ev.get('plan_execution_window_count')}",
+        f"- Active execution seconds: {ev.get('active_execution_seconds')}s",
+        f"- Agent dispatch runtime (sum): {ev.get('agent_runtime_total_seconds')}s",
+        "",
+        "## Human decision / friction",
+        "",
+        f"- Human decision count (preferred): {ev.get('human_decision_count')}",
+        f"- Manual step count: {ev.get('manual_step_count')}",
+        f"- Commands executed (raw, non-comment): {ev.get('commands_executed_count')}",
+        f"- human_interventions_count (legacy alias): {ev.get('human_interventions_count')}",
         f"- Repair loops: {ev.get('repair_loops_count')}",
+        f"- Checkpoints: {ev.get('checkpoint_count')}",
+        f"- Force-like flags: {ev.get('force_like_flags_count')}",
+        f"- Replace flags: {ev.get('replace_flags_count')}",
+        f"- Safety override flags: {ev.get('safety_override_flags_count')}",
+        "",
+        "## Gate summary",
+        "",
+        *gate_lines,
+        "",
+        "## Validator",
+        "",
+        *validator_lines,
         "",
         "## Manual (post-MR)",
         "",

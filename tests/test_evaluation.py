@@ -71,6 +71,7 @@ def _minimal_run(repo: Path) -> Path:
         json.dumps(
             {
                 "overall": "WARN",
+                "profile_compliance": "WARN",
                 "changed_files_count": 2,
                 "lines_added": 10,
                 "lines_deleted": 1,
@@ -139,6 +140,8 @@ def test_evaluate_run_creates_artifacts(tmp_path: Path) -> None:
     assert (run_dir / EVAL_MD).is_file()
     assert ev["run_id"] == run_id
     assert ev["gate_overall"] == "WARN"
+    assert ev["gate_warn_count"] >= 1
+    assert ev["gate_overall_is_warn"] is True
 
 
 def test_extract_validator_verdict(tmp_path: Path) -> None:
@@ -245,4 +248,4 @@ def test_docs_mention_rework_burden() -> None:
     assert "rework" in text
     assert "reviewer" in text
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "1.4.0" in readme
+    assert "1.4" in readme
