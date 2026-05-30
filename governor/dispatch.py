@@ -213,6 +213,8 @@ def run_command(
             input=prompt_text,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             cwd=cwd,
         )

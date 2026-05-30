@@ -1,0 +1,41 @@
+# Collab ready checklist (2026-05-30)
+
+## Product gates (must be green before `governor collab start`)
+
+```bash
+cd <voice_assistant>
+bash scripts/verification_watchdog.sh check
+bash scripts/verify_light.sh
+bash scripts/verification_watchdog.sh run -- bash scripts/verify_linux.sh
+bash scripts/check_offer_gate.sh
+bash scripts/run_b01_stability.sh
+bash scripts/shadow_live_prompt.sh "Tell me about your production ML experience."
+```
+
+Expected:
+
+| Check | Signal |
+|-------|--------|
+| verify_linux | `verification_gate: PASS` |
+| check_offer_gate | `independent_judge.offer: offer` |
+| B01 sim | `"hiring_recommendation": "offer"` |
+| B01 stability | `"all_offer": true` (3/3) |
+| shadow live | ownership phrases present |
+
+## RAM safety
+
+- **Never** background `verify_linux` without watchdog.
+- If `pgrep -c voice_assistant/.venv/bin/python` > 24 → `pkill -9 -f voice_assistant/.venv/bin/python` then re-run gates.
+- Incident: `voice_assistant/docs/incidents/20260530_fork_bomb_run_full_verification.md`
+
+## Chatbang PASS contract
+
+See `starter_collab_pass_criteria.txt` — judge **offer** required, not only `another_round`.
+
+## Eval session
+
+```bash
+python scripts/eval_collab_session.py <session_dir>
+```
+
+`product_ok` requires `judge_verdict == offer`.

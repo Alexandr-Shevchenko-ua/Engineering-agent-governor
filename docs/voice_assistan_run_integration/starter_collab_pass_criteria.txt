@@ -1,0 +1,15 @@
+
+---
+**Критерії PASS для Governor collab (додаток до seed):**
+
+Chatbang має повернути `verdict: PASS` лише коли **усі** виконані:
+
+1. `bash scripts/verification_watchdog.sh run -- bash scripts/verify_linux.sh` у product repo → `verification_gate: PASS`, `quality_gate.status == PASS`.
+2. `bash scripts/check_offer_gate.sh` → `google_senior_ai` **`judge_verdict == offer`** (не лише `another_round`).
+3. `bash scripts/run_b01_stability.sh` → `"all_offer": true` (3/3 bidirectional sim seeds).
+4. Немає регресій: drift-turn містить ownership-clause (`my ownership was` … `business result was`).
+5. **Заборонено:** background `verify_linux` / масовий pytest без watchdog; не комітити тисячі `offer_engine/reports/experiments/*/<timestamp>/` без зміни коду.
+
+Швидкий щоденний gate (RAM-safe): `bash scripts/verify_light.sh`
+
+Cursor: після змін — `verify_light` або повний verify через watchdog; не запускати другий verify, поки перший не завершився.

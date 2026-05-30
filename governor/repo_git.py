@@ -1,8 +1,9 @@
-"""Shared git ignore / tracked-path helpers for check and safety audit."""
+"""Shared git helpers for check, safety audit, and collab commit snapshots."""
 
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from governor.gates import is_git_worktree
@@ -35,3 +36,176 @@ def git_ls_files(repo: Path, path: str) -> list[str]:
 
 def git_tracked_under_governor(repo: Path) -> list[str]:
     return git_ls_files(repo, ".governor")
+
+
+def _run_git(repo: Path, args: list[str], *, timeout: int = 60) -> tuple[int, str, str]:
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return proc.returncode, proc.stdout or "", proc.stderr or ""
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return -1, "", str(e)
+
+
+@dataclass
+class GitSnapshot:
+    is_repo: bool
+    branch: str | None = None
+    head: str | None = None
+    short_status: str = ""
+    diff_stat: str = ""
+    diff_check_ok: bool = True
+    diff_check_output: str = ""
+    has_dirty: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "is_repo": self.is_repo,
+            "branch": self.branch,
+            "head": self.head,
+            "short_status": self.short_status,
+            "diff_stat": self.diff_stat,
+            "diff_check_ok": self.diff_check_ok,
+            "diff_check_output": self.diff_check_output,
+            "has_dirty": self.has_dirty,
+        }
+
+
+@dataclass
+class GitCommitResult:
+    committed: bool
+    commit_hash: str | None = None
+    skipped_reason: str | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "committed": self.committed,
+            "commit_hash": self.commit_hash,
+            "skipped_reason": self.skipped_reason,
+            "error": self.error,
+        }
+
+
+def capture_git_snapshot(repo: Path, *, diff_stat_max_lines: int = 80) -> GitSnapshot:
+    if not is_git_worktree(repo):
+        return GitSnapshot(is_repo=False, short_status="(not a git repository)")
+
+    rc_branch, branch_out, _ = _run_git(repo, ["rev-parse", "--abbrev-ref", "HEAD"])
+    rc_head, head_out, _ = _run_git(repo, ["rev-parse", "--short", "HEAD"])
+    rc_status, status_out, _ = _run_git(repo, ["status", "--short", "--branch"])
+    rc_stat, stat_out, _ = _run_git(repo, ["diff", "--stat"])
+    rc_cached, cached_out, _ = _run_git(repo, ["diff", "--cached", "--stat"])
+    rc_check, check_out, check_err = _run_git(repo, ["diff", "--check"])
+
+    stat_parts = []
+    if stat_out.strip():
+        stat_parts.append(stat_out.strip())
+    if cached_out.strip():
+        stat_parts.append("staged:\n" + cached_out.strip())
+    diff_stat = "\n".join(stat_parts) if stat_parts else "(no diff)"
+    stat_lines = diff_stat.splitlines()
+    if len(stat_lines) > diff_stat_max_lines:
+        diff_stat = "\n".join(stat_lines[:diff_stat_max_lines]) + "\n... (truncated)"
+
+    short_status = (status_out or "").strip() or "(clean)"
+    has_dirty = bool(status_out.strip()) or bool(stat_out.strip()) or bool(cached_out.strip())
+
+    return GitSnapshot(
+        is_repo=True,
+        branch=branch_out.strip() if rc_branch == 0 else None,
+        head=head_out.strip() if rc_head == 0 else None,
+        short_status=short_status[:4000],
+        diff_stat=diff_stat[:8000],
+        diff_check_ok=rc_check == 0,
+        diff_check_output=(check_out + check_err).strip()[:2000],
+        has_dirty=has_dirty,
+    )
+
+
+def _porcelain_paths(repo: Path) -> list[str]:
+    rc, out, _ = _run_git(repo, ["status", "--porcelain"])
+    if rc != 0:
+        return []
+    paths: list[str] = []
+    for line in out.splitlines():
+        if len(line) < 4:
+            continue
+        path_part = line[3:].strip().split(" -> ")[-1].strip()
+        if path_part:
+            paths.append(path_part)
+    return paths
+
+
+def commit_if_dirty(
+    repo: Path,
+    message: str,
+    *,
+    approve: bool,
+    require_diff_check_clean: bool = True,
+    exclude_path_prefixes: tuple[str, ...] = (),
+) -> GitCommitResult:
+    """Stage all changes and commit when the worktree is dirty (requires explicit approve)."""
+    snap = capture_git_snapshot(repo)
+    if not snap.is_repo:
+        return GitCommitResult(False, skipped_reason="not a git repository")
+    if not snap.has_dirty:
+        return GitCommitResult(False, skipped_reason="worktree clean")
+    if not approve:
+        return GitCommitResult(False, skipped_reason="commit requires --approve-commit or --approve")
+    if require_diff_check_clean and not snap.diff_check_ok:
+        return GitCommitResult(
+            False,
+            error=f"git diff --check failed: {snap.diff_check_output[:500]}",
+        )
+
+    if exclude_path_prefixes:
+        paths = _porcelain_paths(repo)
+        staged_any = False
+        for path in paths:
+            if any(path == p or path.startswith(p) for p in exclude_path_prefixes):
+                continue
+            rc_add, _, err_add = _run_git(repo, ["add", "--", path])
+            if rc_add != 0:
+                return GitCommitResult(False, error=f"git add failed for {path}: {err_add}")
+            staged_any = True
+        if not staged_any:
+            return GitCommitResult(False, skipped_reason="only excluded paths dirty")
+    else:
+        rc_add, _, err_add = _run_git(repo, ["add", "-A"])
+        if rc_add != 0:
+            return GitCommitResult(False, error=f"git add failed: {err_add}")
+
+    rc_commit, out_commit, err_commit = _run_git(
+        repo,
+        ["commit", "-m", message],
+        timeout=120,
+    )
+    if rc_commit != 0:
+        combined = (out_commit + err_commit).strip()
+        if "nothing to commit" in combined.lower():
+            return GitCommitResult(False, skipped_reason="nothing to commit after git add")
+        return GitCommitResult(False, error=combined[:1000])
+
+    _, hash_out, _ = _run_git(repo, ["rev-parse", "--short", "HEAD"])
+    return GitCommitResult(
+        committed=True,
+        commit_hash=hash_out.strip() or None,
+    )
+
+
+def push_current_branch(repo: Path, *, approve: bool, remote: str = "origin") -> GitCommitResult:
+    if not approve:
+        return GitCommitResult(False, skipped_reason="push requires --approve-push")
+    if not is_git_worktree(repo):
+        return GitCommitResult(False, skipped_reason="not a git repository")
+    rc, out, err = _run_git(repo, ["push", remote, "HEAD"], timeout=300)
+    if rc != 0:
+        return GitCommitResult(False, error=(out + err).strip()[:1000])
+    return GitCommitResult(committed=True, commit_hash="pushed")

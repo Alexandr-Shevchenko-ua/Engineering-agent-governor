@@ -107,6 +107,7 @@ Human → governor CLI → .governor/runs/<run-id>/artifacts
 | Config | `config`, `project`, `policy`, `version` |
 | Ops | `safety audit`, `diagnose`, `cleanup`, `evaluate` |
 | Governor Mode | `governor propose`, `validate`, `apply`, `compare` (`chatbang` or `cursor-auto` planner) |
+| Collab loop | `collab start` — chatbang review ↔ Cursor executor rounds ([docs/CHATBANG_CURSOR_COLLAB_MODE.md](docs/CHATBANG_CURSOR_COLLAB_MODE.md)) |
 
 Full reference: **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)**
 

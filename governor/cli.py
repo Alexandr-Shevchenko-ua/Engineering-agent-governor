@@ -86,6 +86,12 @@ from governor.governor_mode import (
     render_proposal_markdown,
     validate_proposal,
 )
+from governor.collab_loop import (
+    CollabStartOptions,
+    list_sessions,
+    load_session,
+    run_collab_loop,
+)
 from governor.check import check_exit_code, run_check
 from governor.cleanup import cleanup_proposals, cleanup_runs, cleanup_status, human_size
 from governor.diagnose import diagnose_run
@@ -838,6 +844,130 @@ def _build_parser() -> argparse.ArgumentParser:
     p_gov_apply.add_argument("--no-execute", action="store_true", help="Default in v1.2 (no-op)")
     p_gov_apply.add_argument("--force-unstructured", action="store_true")
     p_gov_apply.add_argument("--json", action="store_true", dest="as_json")
+
+    p_collab = sub.add_parser(
+        "collab",
+        help="Experimental Chatbang↔Cursor collab loop (bounded rounds; --approve or --autopilot)",
+        parents=[parent],
+    )
+    collab_sub = p_collab.add_subparsers(dest="collab_cmd", required=True)
+
+    p_collab_start = collab_sub.add_parser(
+        "start",
+        help="Run collab loop: chatbang review → executor → gates → optional commit",
+        parents=[parent],
+    )
+    p_collab_start.add_argument("--task", required=True)
+    p_collab_start.add_argument("--max-rounds", type=int, default=3)
+    p_collab_start.add_argument("--policy", default=None, metavar="NAME")
+    p_collab_start.add_argument("--gate-profile", default=None, metavar="NAME")
+    p_collab_start.add_argument(
+        "--executor-profile",
+        default="echo-test",
+        help="Cursor/command profile for implementation",
+    )
+    p_collab_start.add_argument(
+        "--commit-policy",
+        default="if_gates_pass",
+        choices=("never", "if_dirty", "if_gates_pass"),
+    )
+    p_collab_start.add_argument("--chatbang-command", default="chatbang")
+    p_collab_start.add_argument("--chatbang-timeout", type=int, default=300)
+    p_collab_start.add_argument(
+        "--chatbang-prompt-pattern",
+        default="> ",
+        help="pexpect prompt pattern for chatbang UI (default: '> ')",
+    )
+    p_collab_start.add_argument("--executor-timeout", type=int, default=None)
+    p_collab_start.add_argument("--approve", action="store_true")
+    p_collab_start.add_argument(
+        "--approve-commit",
+        action="store_true",
+        help="Allow git commit when commit policy matches (also implied by --approve)",
+    )
+    p_collab_start.add_argument(
+        "--approve-push",
+        action="store_true",
+        help="git push after commit (explicit; not recommended by default)",
+    )
+    p_collab_start.add_argument("--dry-run", action="store_true")
+    p_collab_start.add_argument("--continue-on-gate-warn", action="store_true")
+    p_collab_start.add_argument("--skip-gates", action="store_true")
+    p_collab_start.add_argument("--accept-failed-executor", action="store_true")
+    p_collab_start.add_argument("--force-continue-on-hold", action="store_true")
+    p_collab_start.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Skip chatbang probe and executor profile checks (tests only)",
+    )
+    p_collab_start.add_argument(
+        "--chatbang-seed-file",
+        default=None,
+        metavar="PATH",
+        help="Human seed message sent to chatbang first (round 00 bootstrap)",
+    )
+    p_collab_start.add_argument(
+        "--chatbang-seed-text",
+        default=None,
+        help="Inline seed text (alternative to --chatbang-seed-file)",
+    )
+    p_collab_start.add_argument(
+        "--chatbang-human-only",
+        action="store_true",
+        help=(
+            "Do not send Governor wire/prime messages to chatbang — only human seed "
+            "and natural-language follow-ups (no CHATBANG_COLLAB_V1 / CHATBANG_OK probe)"
+        ),
+    )
+    p_collab_start.add_argument(
+        "--autopilot",
+        action="store_true",
+        help="Run without --approve/--approve-commit (implies both for collab rounds)",
+    )
+    p_collab_start.add_argument(
+        "--audit-after",
+        action="store_true",
+        help="After max rounds, run Cursor auditor on governor repo; artifacts in session/audit/",
+    )
+    p_collab_start.add_argument(
+        "--auditor-profile",
+        default=None,
+        metavar="NAME",
+        help="Executor profile for post-run audit (default: same as --executor-profile)",
+    )
+    p_collab_start.add_argument(
+        "--governor-repo-path",
+        default=None,
+        metavar="PATH",
+        help="Engineering-agent-governor repo for audit executor (default: package root)",
+    )
+    p_collab_start.add_argument(
+        "--audit-timeout",
+        type=int,
+        default=None,
+        help="Timeout seconds for audit dispatch",
+    )
+    p_collab_start.add_argument(
+        "--continue-on-chatbang-fail",
+        action="store_true",
+        help=(
+            "If Chatbang times out or errors, still run Cursor when a valid CONTINUE "
+            "JSON with next_executor_prompt was parsed (default: stop with HOLD)"
+        ),
+    )
+    p_collab_start.add_argument(
+        "--no-commit-exclude-dot-governor",
+        action="store_true",
+        help="Include .governor/ collab artifacts in auto-commits (default: exclude)",
+    )
+    p_collab_start.add_argument("--json", action="store_true", dest="as_json")
+
+    p_collab_list = collab_sub.add_parser("list", help="List collab sessions", parents=[parent])
+    p_collab_list.add_argument("--json", action="store_true", dest="as_json")
+
+    p_collab_show = collab_sub.add_parser("show", help="Show collab session", parents=[parent])
+    p_collab_show.add_argument("--session", required=True, metavar="ID")
+    p_collab_show.add_argument("--json", action="store_true", dest="as_json")
 
     p_advisor = sub.add_parser(
         "advisor",
@@ -1988,6 +2118,123 @@ def cmd_governor_reject(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_collab_start(args: argparse.Namespace) -> int:
+    repo_path = _repo_path_from_args(args)
+    opts = CollabStartOptions(
+        task=args.task,
+        repo_path=repo_path,
+        max_rounds=args.max_rounds,
+        policy=args.policy,
+        gate_profile=args.gate_profile,
+        executor_profile=args.executor_profile,
+        commit_policy=args.commit_policy,
+        chatbang_command=args.chatbang_command,
+        chatbang_timeout=args.chatbang_timeout,
+        executor_timeout=args.executor_timeout,
+        approve=args.approve,
+        approve_commit=args.approve_commit,
+        approve_push=args.approve_push,
+        dry_run=args.dry_run,
+        continue_on_gate_warn=args.continue_on_gate_warn,
+        skip_gates=args.skip_gates,
+        accept_failed_executor=args.accept_failed_executor,
+        force_continue_on_hold=args.force_continue_on_hold,
+        skip_preflight=args.skip_preflight,
+        chatbang_seed_file=args.chatbang_seed_file,
+        chatbang_seed_text=args.chatbang_seed_text,
+        autopilot=args.autopilot,
+        run_audit_after=args.audit_after,
+        auditor_profile=args.auditor_profile,
+        governor_repo_path=args.governor_repo_path,
+        audit_timeout=args.audit_timeout,
+        chatbang_human_only=args.chatbang_human_only,
+        chatbang_prompt_pattern=args.chatbang_prompt_pattern,
+        continue_on_chatbang_fail=args.continue_on_chatbang_fail,
+        commit_exclude_dot_governor=not args.no_commit_exclude_dot_governor,
+    )
+    try:
+        result = run_collab_loop(opts)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "session_id": result.session_id,
+                    "session_dir": str(result.session_dir),
+                    "status": result.status,
+                    "rounds_completed": result.rounds_completed,
+                    "exit_code": result.exit_code,
+                    "error": result.error,
+                    "last_run_id": result.last_run_id,
+                    "audit_run_id": result.audit_run_id,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(f"Collab session: {result.session_id}")
+        print(f"Folder:       {result.session_dir}")
+        print(f"Status:       {result.status}")
+        print(f"Rounds:       {result.rounds_completed}")
+        if result.last_run_id:
+            print(f"Last run:     {result.last_run_id}")
+        if result.audit_run_id:
+            print(f"Audit run:    {result.audit_run_id}")
+            print(f"Audit folder: {result.session_dir / 'audit'}")
+        if result.error:
+            print(f"Note:         {result.error}")
+        if result.status == "NEEDS_APPROVE":
+            print("Next: re-run with --approve or --autopilot to execute rounds")
+    return result.exit_code
+
+
+def cmd_collab_list(args: argparse.Namespace) -> int:
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    entries = list_sessions(repo)
+    if args.as_json:
+        print(json.dumps(entries, indent=2))
+        return 0
+    if not entries:
+        print("No collab sessions.")
+        return 0
+    for e in entries:
+        print(
+            f"{e.get('session_id')}  {e.get('status')}  "
+            f"round {e.get('current_round')}/{e.get('max_rounds')}  {e.get('task')}"
+        )
+    return 0
+
+
+def cmd_collab_show(args: argparse.Namespace) -> int:
+    repo = resolve_repo_path(_repo_path_from_args(args))
+    try:
+        root, session = load_session(repo, args.session)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(session.to_dict(), indent=2))
+        return 0
+    print(f"Session:  {session.session_id}")
+    print(f"Status:   {session.status}")
+    print(f"Task:     {session.task}")
+    print(f"Rounds:   {session.current_round}/{session.max_rounds}")
+    print(f"Policy:   {session.policy}  commit={session.commit_policy}")
+    print(f"Executor: {session.executor_profile}")
+    print(f"Folder:   {root}")
+    if session.stop_reason:
+        print(f"Stop:     {session.stop_reason}")
+    for r in session.rounds:
+        print(
+            f"  round {r.round_number}: verdict={r.chatbang_verdict} "
+            f"run={r.run_id} gates={r.gate_overall} commit={r.commit_hash}"
+        )
+    return 0
+
+
 def cmd_governor_apply(args: argparse.Namespace) -> int:
     repo = resolve_repo_path(_repo_path_from_args(args))
     try:
@@ -2389,6 +2636,13 @@ def main(argv: list[str] | None = None) -> int:
             "apply": cmd_governor_apply,
         }
         return gov_handlers[args.governor_cmd](args)
+    if args.command == "collab":
+        collab_handlers = {
+            "start": cmd_collab_start,
+            "list": cmd_collab_list,
+            "show": cmd_collab_show,
+        }
+        return collab_handlers[args.collab_cmd](args)
     if args.command == "safety":
         if args.safety_cmd == "audit":
             return cmd_safety_audit(args)

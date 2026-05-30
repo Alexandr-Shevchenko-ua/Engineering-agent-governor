@@ -28,6 +28,27 @@ def resolve_repo_path(path: str | None) -> Path:
     return Path(path or ".").resolve()
 
 
+def flatten_for_chatbang_line(text: str, *, max_chars: int = 12_000) -> str:
+    """One physical line for chatbang UIs that submit on Enter (avoid multi-message seed)."""
+    line = text.replace("\r\n", "\n").replace("\n", " ⏎ ").strip()
+    if len(line) > max_chars:
+        line = line[: max_chars - 24] + " …(truncated for chatbang UI)"
+    return line
+
+
+def read_text_robust(path: Path) -> str:
+    """Read text file with UTF-8 (BOM) and common fallbacks for Ukrainian/Windows saves."""
+    raw = path.read_bytes()
+    if not raw:
+        return ""
+    for enc in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
+        try:
+            return raw.decode(enc).strip()
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace").strip()
+
+
 def governor_root(repo_path: Path) -> Path:
     return repo_path / ".governor"
 
@@ -38,6 +59,15 @@ def runs_dir(repo_path: Path) -> Path:
 
 def proposals_dir(repo_path: Path) -> Path:
     return governor_root(repo_path) / "proposals"
+
+
+def collab_dir(repo_path: Path) -> Path:
+    return governor_root(repo_path) / "collab"
+
+
+def validate_collab_session_id(session_id: str | None) -> str | None:
+    """Collab sessions use the same id shape as run/proposal folders."""
+    return validate_run_id(session_id)
 
 
 def validate_proposal_id(proposal_id: str | None) -> str | None:
