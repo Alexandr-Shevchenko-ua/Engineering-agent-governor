@@ -4,7 +4,7 @@
 
 ```bash
 cd <voice_assistant>
-bash scripts/iter_gate.sh          # iterative default: light + B01 + B10
+bash scripts/iter_gate.sh          # iterative default: light + B01 + B08 + B10
 bash scripts/pre_collab_gate.sh     # before collab
 bash scripts/raise_the_bar_gate.sh  # milestone: + full verify_linux
 ```
