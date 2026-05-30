@@ -22,7 +22,7 @@ echo "If collab fails with profile lock, run: pkill -f chatbang; pkill -f 'chrom
 echo "Governor spawns a NEW chatbang (browser ChatGPT) — not your manual copy/paste session."
 echo "Progress: [governor collab] on stderr. Chatbang reply may take 2–10 min; Cursor 10–30+ min."
 echo "v1.8: human-only + JSON contract; stops on Chatbang fail/timeout (no fake CONTINUE)."
-echo "Pre-flight (product repo): bash scripts/verify_light.sh && bash scripts/run_b01_stability.sh"
+echo "Pre-flight (product repo): bash scripts/pre_collab_gate.sh"
 echo "RAM: use scripts/verification_watchdog.sh run -- bash scripts/verify_linux.sh (never background verify without watchdog)."
 echo "Product repo: $VA_REPO"
 echo "Seed: $SEED_FILE"

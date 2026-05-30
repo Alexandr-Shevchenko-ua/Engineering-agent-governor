@@ -4,12 +4,10 @@
 
 ```bash
 cd <voice_assistant>
-bash scripts/verification_watchdog.sh check
-bash scripts/verify_light.sh
+bash scripts/pre_collab_gate.sh
+# Full L1 (when RAM OK):
 bash scripts/verification_watchdog.sh run -- bash scripts/verify_linux.sh
 bash scripts/check_offer_gate.sh
-bash scripts/run_b01_stability.sh
-bash scripts/shadow_live_prompt.sh "Tell me about your production ML experience."
 ```
 
 Expected:
