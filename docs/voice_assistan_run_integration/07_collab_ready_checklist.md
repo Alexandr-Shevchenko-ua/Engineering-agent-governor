@@ -5,9 +5,9 @@
 ```bash
 cd <voice_assistant>
 bash scripts/pre_collab_gate.sh
-# Full L1 (when RAM OK):
-bash scripts/verification_watchdog.sh run -- bash scripts/verify_linux.sh
-bash scripts/check_offer_gate.sh
+
+# Milestone / major collab round (highest bar):
+bash scripts/raise_the_bar_gate.sh
 ```
 
 Expected:
