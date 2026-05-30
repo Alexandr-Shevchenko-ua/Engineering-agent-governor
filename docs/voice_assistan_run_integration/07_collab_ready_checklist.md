@@ -7,7 +7,9 @@ cd <voice_assistant>
 bash scripts/iter_gate.sh          # light + B01 + B08 + B05 (skip w/o API) + B10
 bash scripts/pre_collab_gate.sh     # before collab (stability + shadow)
 # optional offline: OPENAI_API_KEY=... bash scripts/run_b05_ab_compare.sh
-bash scripts/raise_the_bar_gate.sh  # milestone: + full verify_linux
+bash scripts/raise_the_bar_gate.sh  # milestone: + full verify_linux (logs milestone_gate_index.jsonl)
+
+Product doc: `<voice_assistant>/docs/COLLAB_READY.md`
 ```
 
 Expected:
