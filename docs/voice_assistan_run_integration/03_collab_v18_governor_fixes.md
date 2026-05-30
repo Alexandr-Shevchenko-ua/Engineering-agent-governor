@@ -6,7 +6,8 @@ After post-mortem of `20260526T214847Z_collab_voice-assistant-quality-maximum-ag
 
 | Issue | Fix |
 |-------|-----|
-| Fake CONTINUE on every round (`parse_error` + freeform fallback) | Human-only: **no** freeform fallback → **HOLD** `MISSING_COLLAB_JSON` |
+| Fake CONTINUE on every round (`parse_error` + freeform fallback) | Human-only: no legacy freeform; **markdown executor brief** → `CONTINUE` |
+| Chatbang returns long Patch-or-Fail markdown without JSON | `_extract_markdown_executor_prompt` → Cursor (2026-05-30) |
 | Chatbang timeout but Cursor still runs | Stop before executor unless `--continue-on-chatbang-fail` or valid CONTINUE JSON |
 | PASS/empty prompt triggered JSON retry | Retry only when `CONTINUE` without `next_executor_prompt` |
 | Commits blocked by `.governor/` gate noise | Default `commit_exclude_dot_governor=True` (stage product paths only) |

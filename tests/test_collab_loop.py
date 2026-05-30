@@ -236,6 +236,23 @@ def test_review_from_chatbang_no_freeform_fallback() -> None:
     assert not review.next_executor_prompt.strip()
 
 
+def test_review_from_chatbang_markdown_executor_fallback() -> None:
+    from governor.collab_loop import review_from_chatbang_output
+
+    body = (
+        "[Thinking...]\n\n"
+        "FINAL EXECUTOR — Patch-or-Fail\n\n"
+        "## Non-negotiable instruction\n"
+        "You must patch files in the product repo.\n" + ("detail " * 120)
+    )
+    review = review_from_chatbang_output(
+        body, task="voice assistant", allow_freeform_fallback=False
+    )
+    assert review.verdict == "CONTINUE"
+    assert "Non-negotiable" in review.next_executor_prompt
+    assert review.stop_reason is None
+
+
 def test_commit_excludes_path_prefix(git_repo: Path) -> None:
     from governor.repo_git import commit_if_dirty
 

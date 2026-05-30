@@ -406,6 +406,16 @@ def review_from_chatbang_output(
             parse_error=parse_error_label,
         )
     if not allow_freeform_fallback:
+        md_prompt = _extract_markdown_executor_prompt(cb_output)
+        if md_prompt:
+            return CollabReview(
+                verdict="CONTINUE",
+                summary="Chatbang markdown executor brief (no JSON collab block)",
+                next_executor_prompt=md_prompt,
+                stop_reason=None,
+                raw_response=cb_output,
+                parse_error=parse_error_label,
+            )
         return CollabReview(
             verdict="HOLD",
             summary="Chatbang did not return required ```json collab block",
@@ -507,6 +517,37 @@ def _try_parse_json_object(raw: str) -> dict[str, Any] | None:
             start = end
         except json.JSONDecodeError:
             start = brace + 1
+    return None
+
+
+def _extract_markdown_executor_prompt(text: str) -> str | None:
+    """Human-only Chatbang often returns a full Cursor brief without ```json collab```."""
+    if not text.strip():
+        return None
+    cleaned = re.sub(r"\[Thinking\.\.\.\]\s*", "", text, flags=re.IGNORECASE)
+    tail = _collab_response_tail(cleaned)
+    markers = (
+        "FINAL EXECUTOR",
+        "Patch-or-Fail",
+        "## Non-negotiable instruction",
+        "# FINAL EXECUTOR",
+        "Non-negotiable instruction",
+    )
+    start = -1
+    for marker in markers:
+        idx = tail.lower().find(marker.lower())
+        if idx >= 0 and (start < 0 or idx < start):
+            start = idx
+    if start >= 0:
+        chunk = tail[start:].strip()
+        if len(chunk) >= 400:
+            return chunk[:MAX_EXECUTOR_PROMPT]
+    if len(tail) >= 800 and (
+        "working directory" in tail.lower()
+        or "patch objective" in tail.lower()
+        or "non-negotiable" in tail.lower()
+    ):
+        return tail[:MAX_EXECUTOR_PROMPT]
     return None
 
 
