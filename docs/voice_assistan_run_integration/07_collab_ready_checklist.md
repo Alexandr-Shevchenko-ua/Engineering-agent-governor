@@ -4,10 +4,9 @@
 
 ```bash
 cd <voice_assistant>
-bash scripts/pre_collab_gate.sh
-
-# Milestone / major collab round (highest bar):
-bash scripts/raise_the_bar_gate.sh
+bash scripts/iter_gate.sh          # iterative default: light + B01 + B10
+bash scripts/pre_collab_gate.sh     # before collab
+bash scripts/raise_the_bar_gate.sh  # milestone: + full verify_linux
 ```
 
 Expected:
