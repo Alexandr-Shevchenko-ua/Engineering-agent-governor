@@ -37,5 +37,9 @@ python scripts/eval_collab_session.py <session_dir>
 ```
 
 `product_ok` requires `judge_verdict == offer`.
-- B07 claim memory in product B01 + live path
-- B05 LLM interviewer: OFFER_ENGINE_LLM_INTERVIEWER=1 + OPENAI_API_KEY
+
+## Optional experiments (raise the bar further)
+
+- **B07** claim memory — on by default in B01 + live adapter (`claim_memory` in session summary).
+- **B05** LLM interviewer — `export OFFER_ENGINE_LLM_INTERVIEWER=1` + `OPENAI_API_KEY`; `bash scripts/run_b05_llm_interview.sh`.
+- **B10** counterfactual — `bash scripts/run_b01_counterfactual.sh`.
