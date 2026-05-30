@@ -1083,9 +1083,46 @@ def _execute_executor_round(
     )
     record.executor_exit_code = exec_code
 
+    if exec_code != 0 and not opts.accept_failed_executor:
+        failed_md = run_dir / "05_executor_output.failed.md"
+        if failed_md.is_file():
+            excerpt = (excerpt or "") + "\n" + read_text_robust(failed_md)[:4000]
+        record.stopped = True
+        record.stop_reason = f"EXECUTOR_EXIT_{exec_code}"
+        _write_round_artifacts(
+            rdir,
+            request_md=chatbang_sent_md,
+            response_md=cb_output or "(empty)",
+            review=review,
+            executor_prompt=review.next_executor_prompt,
+            gate_report=None,
+            commit=None,
+            governor_request_md=governor_request_md,
+        )
+        session.rounds.append(record)
+        _collab_log(f"Stopped after failed Cursor dispatch (exit={exec_code}); skipping gates")
+        return (
+            exec_code,
+            excerpt,
+            None,
+            GitCommitResult(False),
+            run_id,
+            True,
+            record.stop_reason,
+        )
+
     gate_report_dict: dict[str, Any] | None = None
     gate_overall: str | None = None
     if not opts.skip_gates:
+        from governor.models import RunState, can_transition
+
+        _, meta = store.get_run(run_id)
+        if not can_transition(RunState(meta.state), "gate"):
+            raise ValueError(
+                f"Cannot run gates from state {meta.state} after executor "
+                f"(exit={exec_code}). Record executor output first or use "
+                "--accept-failed-executor for diagnostic-only runs."
+            )
         report = run_gates(repo, gate_profile=gate_prof)
         gate_overall = report.overall
         record.gate_overall = gate_overall
@@ -1119,17 +1156,6 @@ def _execute_executor_round(
         governor_request_md=governor_request_md,
     )
     session.rounds.append(record)
-
-    if exec_code != 0 and not opts.accept_failed_executor:
-        return (
-            exec_code,
-            excerpt,
-            gate_overall,
-            commit_result,
-            run_id,
-            True,
-            f"executor exit {exec_code}",
-        )
     return exec_code, excerpt, gate_overall, commit_result, run_id, False, None
 
 
