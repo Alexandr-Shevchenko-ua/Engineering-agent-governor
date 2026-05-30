@@ -37,3 +37,5 @@ python scripts/eval_collab_session.py <session_dir>
 ```
 
 `product_ok` requires `judge_verdict == offer`.
+- B07 claim memory in product B01 + live path
+- B05 LLM interviewer: OFFER_ENGINE_LLM_INTERVIEWER=1 + OPENAI_API_KEY
