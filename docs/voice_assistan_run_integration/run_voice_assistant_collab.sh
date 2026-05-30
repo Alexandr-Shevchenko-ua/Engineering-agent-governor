@@ -50,7 +50,12 @@ python -m governor collab start \
 SESSION_DIR="$(ls -td "$VA_REPO/.governor/collab/"*_collab_voice-assistant-quality-maximum-aggressive-offer 2>/dev/null | head -1 || true)"
 if [[ -n "$SESSION_DIR" ]]; then
   echo
-  echo "==> collab + product eval"
+  echo "==> Governor quality scorecard (after every collab)"
+  python "$GOV_ROOT/scripts/eval_governor_collab_quality.py" \
+    --session-root "$SESSION_DIR" \
+    --verification-summary "$VA_REPO/offer_engine/reports/latest/verification_summary.json" || true
+  echo
+  echo "==> Honest collab + product eval"
   python "$GOV_ROOT/scripts/eval_collab_session.py" \
     --session-root "$SESSION_DIR" \
     --verification-summary "$VA_REPO/offer_engine/reports/latest/verification_summary.json" || true

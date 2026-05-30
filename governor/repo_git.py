@@ -38,6 +38,27 @@ def git_tracked_under_governor(repo: Path) -> list[str]:
     return git_ls_files(repo, ".governor")
 
 
+def git_worktree_root(repo: Path) -> Path:
+    """Repository top-level (follows nested product dirs inside monorepos)."""
+    rc, out, _ = _run_git(repo, ["rev-parse", "--show-toplevel"])
+    if rc == 0 and out.strip():
+        return Path(out.strip())
+    return repo.resolve()
+
+
+def _path_excluded(path: str, exclude_path_prefixes: tuple[str, ...]) -> bool:
+    if not exclude_path_prefixes:
+        return False
+    normalized = path.replace("\\", "/")
+    for prefix in exclude_path_prefixes:
+        p = prefix.replace("\\", "/").lstrip("./")
+        if normalized == p or normalized.startswith(p):
+            return True
+        if f"/{p}" in normalized or normalized.endswith(f"/{p.rstrip('/')}"):
+            return True
+    return False
+
+
 def _run_git(repo: Path, args: list[str], *, timeout: int = 60) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
@@ -94,15 +115,16 @@ class GitCommitResult:
 
 
 def capture_git_snapshot(repo: Path, *, diff_stat_max_lines: int = 80) -> GitSnapshot:
-    if not is_git_worktree(repo):
+    git_root = git_worktree_root(repo)
+    if not is_git_worktree(git_root):
         return GitSnapshot(is_repo=False, short_status="(not a git repository)")
 
-    rc_branch, branch_out, _ = _run_git(repo, ["rev-parse", "--abbrev-ref", "HEAD"])
-    rc_head, head_out, _ = _run_git(repo, ["rev-parse", "--short", "HEAD"])
-    rc_status, status_out, _ = _run_git(repo, ["status", "--short", "--branch"])
-    rc_stat, stat_out, _ = _run_git(repo, ["diff", "--stat"])
-    rc_cached, cached_out, _ = _run_git(repo, ["diff", "--cached", "--stat"])
-    rc_check, check_out, check_err = _run_git(repo, ["diff", "--check"])
+    rc_branch, branch_out, _ = _run_git(git_root, ["rev-parse", "--abbrev-ref", "HEAD"])
+    rc_head, head_out, _ = _run_git(git_root, ["rev-parse", "--short", "HEAD"])
+    rc_status, status_out, _ = _run_git(git_root, ["status", "--short", "--branch"])
+    rc_stat, stat_out, _ = _run_git(git_root, ["diff", "--stat"])
+    rc_cached, cached_out, _ = _run_git(git_root, ["diff", "--cached", "--stat"])
+    rc_check, check_out, check_err = _run_git(git_root, ["diff", "--check"])
 
     stat_parts = []
     if stat_out.strip():
@@ -152,7 +174,8 @@ def commit_if_dirty(
     exclude_path_prefixes: tuple[str, ...] = (),
 ) -> GitCommitResult:
     """Stage all changes and commit when the worktree is dirty (requires explicit approve)."""
-    snap = capture_git_snapshot(repo)
+    git_root = git_worktree_root(repo)
+    snap = capture_git_snapshot(git_root)
     if not snap.is_repo:
         return GitCommitResult(False, skipped_reason="not a git repository")
     if not snap.has_dirty:
@@ -166,24 +189,24 @@ def commit_if_dirty(
         )
 
     if exclude_path_prefixes:
-        paths = _porcelain_paths(repo)
+        paths = _porcelain_paths(git_root)
         staged_any = False
         for path in paths:
-            if any(path == p or path.startswith(p) for p in exclude_path_prefixes):
+            if _path_excluded(path, exclude_path_prefixes):
                 continue
-            rc_add, _, err_add = _run_git(repo, ["add", "--", path])
+            rc_add, _, err_add = _run_git(git_root, ["add", "--", path])
             if rc_add != 0:
                 return GitCommitResult(False, error=f"git add failed for {path}: {err_add}")
             staged_any = True
         if not staged_any:
             return GitCommitResult(False, skipped_reason="only excluded paths dirty")
     else:
-        rc_add, _, err_add = _run_git(repo, ["add", "-A"])
+        rc_add, _, err_add = _run_git(git_root, ["add", "-A"])
         if rc_add != 0:
             return GitCommitResult(False, error=f"git add failed: {err_add}")
 
     rc_commit, out_commit, err_commit = _run_git(
-        repo,
+        git_root,
         ["commit", "-m", message],
         timeout=120,
     )
